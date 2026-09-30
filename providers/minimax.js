@@ -26,11 +26,15 @@ export class MinimaxProvider extends StreamingProvider {
             </select>
             <p class="canary-help">Keys only work in the region where they were issued.</p>
             ${keyFieldsHtml('MiniMax')}`;
-        const voice = `<label for="canary-model">Model</label>
-            <select id="canary-model" class="text_pole">
-                ${MODELS.map(model => `<option value="${model}">${model}</option>`).join('')}
-            </select>
-            <p class="canary-help">speech-2.8 models perform tags such as (laughs) or (sighs) written in the text.</p>
+        const voice = `<div class="canary-row">
+                <div><label for="canary-model">Model</label>
+                    <select id="canary-model" class="text_pole">
+                        ${MODELS.map(model => `<option value="${model}">${model}</option>`).join('')}
+                    </select></div>
+                <div><label for="canary-speed">Speed (0.5–2×)</label>
+                    <input id="canary-speed" class="text_pole" type="number" min="0.5" max="2" step="0.05" inputmode="decimal" /></div>
+            </div>
+            <p class="canary-help">Speed changes the pace without changing pitch. speech-2.8 models perform tags such as (laughs) or (sighs) written in the text.</p>
             <div class="canary-row">
                 <div><label for="canary-emotion">Emotion</label>
                     <select id="canary-emotion" class="text_pole">
@@ -44,7 +48,7 @@ export class MinimaxProvider extends StreamingProvider {
                     </select></div>
             </div>
             <p id="canary-emotion-warning" class="canary-help canary-warning" hidden></p>
-            <p class="canary-help">Emotion and language apply to every voice. Set a language if auto-detect misreads short or mixed lines. Speed follows SillyTavern’s Audio Playback Speed above.</p>`;
+            <p class="canary-help">Emotion and language apply to every voice. Set a language if auto-detect misreads short or mixed lines.</p>`;
         const tuning = `<div class="canary-row">
                 <div><label for="canary-volume">Volume <span id="canary-volume-value" class="canary-value"></span></label>
                     <input id="canary-volume" type="range" min="0.1" max="10" step="0.1" /></div>
@@ -74,6 +78,7 @@ export class MinimaxProvider extends StreamingProvider {
             customModel: typeof settings.customModel === 'string' ? settings.customModel.trim().slice(0, 64) : '',
             emotion: EMOTIONS.includes(settings.emotion) ? settings.emotion : '',
             language: LANGUAGES.some(item => item.value === settings.language) ? settings.language : 'auto',
+            speed: Math.round(clamp(settings.speed, 0.5, 2, 1) * 100) / 100,
             volume: Math.round(clamp(settings.volume, 0.1, 10, 1) * 10) / 10,
             pitch: Math.round(clamp(settings.pitch, -12, 12, 0)),
             normalize: settings.normalize === true,
@@ -81,6 +86,8 @@ export class MinimaxProvider extends StreamingProvider {
     }
 
     summaryParts() { return [REGION_LABELS[this.settings.region]]; }
+    // MiniMax has its own speed setting; SillyTavern's slider is hidden while it is active.
+    playbackSpeed() { return this.settings.speed; }
     groupVoices(voices) { return groupVoices(voices); }
 
     bindSettings(get, on) {
@@ -103,6 +110,9 @@ export class MinimaxProvider extends StreamingProvider {
         get('canary-model').value = this.settings.model;
         get('canary-emotion').value = this.settings.emotion;
         get('canary-language').value = this.settings.language;
+        get('canary-speed').value = this.settings.speed.toFixed(2);
+        // SillyTavern re-shows its slider on provider changes; a stylesheet rule outranks that.
+        document.body.classList.add('canary-own-speed');
         showTuning();
         showWarning();
         on('canary-region', 'change', () => {
@@ -115,6 +125,12 @@ export class MinimaxProvider extends StreamingProvider {
         on('canary-model', 'change', () => { this.settings.model = get('canary-model').value; save(); showWarning(); });
         on('canary-emotion', 'change', () => { this.settings.emotion = get('canary-emotion').value; save(); showWarning(); });
         on('canary-language', 'change', () => { this.settings.language = get('canary-language').value; save(); });
+        // Commit on change (Enter or leaving the box); empty or invalid input restores the last value.
+        on('canary-speed', 'change', () => {
+            this.settings.speed = this.parseSettings({ speed: get('canary-speed').value.trim() || this.settings.speed }).speed;
+            get('canary-speed').value = this.settings.speed.toFixed(2);
+            save();
+        });
         on('canary-custom-model', 'input', () => { this.settings.customModel = get('canary-custom-model').value.trim(); save(); showWarning(); });
         on('canary-volume', 'input', () => { this.settings.volume = Number(get('canary-volume').value); showTuning(); save(); });
         on('canary-pitch', 'input', () => { this.settings.pitch = Number(get('canary-pitch').value); showTuning(); save(); });
@@ -182,6 +198,11 @@ export class MinimaxProvider extends StreamingProvider {
         await super.onRefreshClick();
         const error = await this.reloadVoices();
         if (error) throw error;
+    }
+
+    dispose() {
+        document.body?.classList.remove('canary-own-speed');
+        super.dispose();
     }
 
     split(text) { return splitText(text, TEXT_LIMIT); }

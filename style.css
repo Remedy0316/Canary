@@ -16,3 +16,5 @@
 .canary-settings input, .canary-settings textarea, .canary-settings select { max-width: 100%; }
 .canary-settings input[type="range"] { width: 100%; margin-inline: 0; box-sizing: border-box; }
 .canary-settings .canary-remember { display: flex; align-items: center; gap: 0.5rem; }
+/* MiniMax (Canary) has its own Speed setting; hide SillyTavern's slider while it is active. */
+body.canary-own-speed #playback_rate_block { display: none !important; }

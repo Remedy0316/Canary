@@ -180,3 +180,11 @@ test('MiniMax provider settings clamp fine-tuning and reject unknown languages',
     assert.deepEqual(provider.parseSettings({ volume: '', pitch: null }).volume, 1);
     assert.equal(provider.summaryParts()[0], 'Global');
 });
+
+test('MiniMax speed setting is clamped, rounded and used instead of SillyTavern’s slider', () => {
+    const provider = new MinimaxProvider({ keys: { value: '' }, getPlaybackRate: () => 2.5 });
+    assert.equal(provider.parseSettings({}).speed, 1);
+    assert.deepEqual(['3', '0.1', 'abc', 1.234, '0.75'].map(speed => provider.parseSettings({ speed }).speed), [2, 0.5, 1, 1.23, 0.75]);
+    provider.settings = provider.parseSettings({ speed: 1.25 });
+    assert.equal(provider.playbackSpeed(), 1.25);
+});

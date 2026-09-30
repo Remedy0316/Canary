@@ -7,7 +7,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "Remedy0316",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "homePage": "https://github.com/Remedy0316/Canary",
     "minimum_client_version": "1.19.0",
     "auto_update": true,

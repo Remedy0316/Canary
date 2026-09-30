@@ -52,7 +52,7 @@ Settings are grouped into collapsible sections. **Connection** folds to a one-li
 - **Model:** `speech-2.8-hd` (default), `speech-2.8-turbo`, `speech-2.6-hd`, `speech-2.6-turbo`, `speech-02-hd` or `speech-02-turbo`. `speech-2.8` models perform interjection tags written in the text, such as `(laughs)` or `(sighs)`, and MiniMax reads `<#0.5#>` as a half-second pause.
 - **Emotion:** **Auto** (default) lets the model choose from the text. Happy, sad, angry, fearful, disgusted, surprised, calm, fluent or whisper applies to every voice. MiniMax lists fluent and whisper only for `speech-2.6` models; Canary shows a warning if you pick them with another listed model.
 - **Language:** **Auto-detect** (default) or one of the 40 languages MiniMax supports (`language_boost`). Set one if auto-detection misreads short or mixed lines, for example Cantonese read as Mandarin. Applies to every voice.
-- **Playback speed:** Uses SillyTavern's **Audio Playback Speed** slider, sent to MiniMax as its speed parameter (0.5–2×), so speech changes pace without changing pitch.
+- **Speed:** Type a value from 0.5 to 2 (default 1.00); values outside that range are limited to it, and an empty entry keeps the previous value. Sent to MiniMax as its speed parameter, so speech changes pace without changing pitch. While MiniMax (Canary) is selected, SillyTavern's **Audio Playback Speed** slider is hidden and not used; it returns for other providers.
 
 **Fine-tuning**
 
@@ -72,7 +72,7 @@ Long passages are split at a client policy of 3,000 Unicode code points per requ
 ### Both providers
 
 - **Streaming buffer:** 80, 120 (default), or 250 ms. This is the local playback buffer, not a promise about the provider's server latency. A larger buffer can absorb small network delays.
-- **Playback speed:** Uses SillyTavern's playback-speed setting when each speech job starts, clamped to 0.5–2×. MiMo audio is played faster or slower, which also shifts pitch.
+- **Playback speed (MiMo):** Uses SillyTavern's **Audio Playback Speed** slider when each speech job starts, clamped to 0.5–2×. MiMo audio is played faster or slower, which also shifts pitch. MiniMax uses its own **Speed** setting instead.
 - **Enable audio:** Click once if the browser blocks automatic audio. Preview and native narration clicks also attempt to enable it.
 - **Stop:** Canary's Stop button and SillyTavern's native TTS Stop cancel both playback and the HTTP stream. Chat changes, swipes, provider changes, and disabling TTS also stop playback.
 - **Automatic narration:** Uses SillyTavern's existing settings. To start narrating paragraphs while a chat response is still being written, enable its **Auto Generation** and **Narrate by paragraphs (when streaming)** options. This is separate from streaming the audio of each passage.

@@ -106,6 +106,8 @@ export class StreamingProvider {
     bindSettings() { /* Provider-specific controls. */ }
     onKeyChanged() { /* Provider-specific reaction to a saved or removed key. */ }
     summaryParts() { return []; }
+    // SillyTavern's Audio Playback Speed, unless the provider has its own setting.
+    playbackSpeed() { return this.host.getPlaybackRate(); }
     // Preview list headings; a null label lists voices without a heading.
     groupVoices(voices) { return [{ label: null, voices }]; }
 
@@ -306,7 +308,7 @@ export class StreamingProvider {
         try {
             const context = await this.unlockAudio();
             signal.throwIfAborted();
-            const speed = Math.min(2, Math.max(0.5, Number(this.host.getPlaybackRate()) || 1));
+            const speed = Math.min(2, Math.max(0.5, Number(this.playbackSpeed()) || 1));
             run.player = new PcmPlayer(context, {
                 bufferMs: this.settings.bufferMs,
                 rate: this.nativeSpeed ? 1 : speed,
