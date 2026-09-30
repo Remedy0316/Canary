@@ -27,6 +27,7 @@ export async function initialize() {
                     saveSettings: () => tts.saveTtsProviderSettings(),
                     getPlaybackRate: () => context.extensionSettings.tts?.playback_rate || 1,
                     notify: message => toastr.error(message, 'Canary'),
+                    notifySuccess: message => toastr.success(message, 'Canary'),
                 });
                 activeProvider = this;
             }

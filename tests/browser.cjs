@@ -53,7 +53,7 @@ body{background:#222;color:#eee;font:16px system-ui;margin:16px;max-width:720px}
 </style><h1>Canary integration QA</h1><div id="tts_container"></div><div id="tts_wand_container"></div>
 <div class="mes" mesid="0"><button class="mes_narrate">Read Alice</button></div>
 <script src="/jquery.js"></script><script>
-window.errors=[];window.toastr={error:m=>window.errors.push(String(m)),info:()=>{}};
+window.errors=[];window.notices=[];window.toastr={error:m=>window.errors.push(String(m)),success:m=>window.notices.push(String(m)),info:()=>{}};
 window.events=new Proxy({},{get:(_,p)=>p});
 window.bus={handlers:{},ready:false,on(e,fn){(this.handlers[e]??=[]).push(fn);if(e==='APP_READY'&&this.ready)void fn()},makeLast(e,fn){this.on(e,fn)},removeListener(e,fn){this.handlers[e]=(this.handlers[e]||[]).filter(f=>f!==fn)},async emit(e,...args){if(e==='APP_READY')this.ready=true;for(const fn of [...(this.handlers[e]||[])])await fn(...args)}};
 window.settings={tts:{enabled:true,currentProvider:new URLSearchParams(location.search).has('restore')?'Xiaomi MiMo (Canary)':'Edge',auto_generation:false,playback_rate:1,'Xiaomi MiMo (Canary)':{voiceMap:{'[Default Voice]':'Mia',Alice:'Mia'}}}};
@@ -146,6 +146,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.selectOption('#tts_provider', 'Xiaomi MiMo (Canary)');
         await page.locator('#canary-key').fill('qa-key-never-real');
         await page.click('#canary-save-key');
+        assert.equal(await page.evaluate(() => window.notices.at(-1)), 'Key saved until this page closes or reloads.');
         assert.equal(await page.locator('#canary-preview-voice option').count(), 8);
         assert.equal(await page.inputValue('#canary-preview-language'), 'bilingual');
         await page.locator('#canary-instructions').fill('Speak calmly.');
@@ -271,6 +272,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.check('#canary-remember');
         await page.click('#canary-save-key');
         assert.equal(await page.evaluate(() => window.settings.canary.mimoKey), 'qa-key-never-real');
+        assert.equal(await page.evaluate(() => window.notices.at(-1)), 'Key saved to this SillyTavern account.');
         assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings.tts))).includes('qa-key-never-real'));
         assert.equal(await page.evaluate(() => localStorage.length), 0);
         await page.goto(`http://127.0.0.1:${server.address().port}/?restore`);
@@ -287,6 +289,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.selectOption('#tts_provider', 'Xiaomi MiMo (Canary)');
         console.log('PASS provider change during native narration');
         await page.click('#canary-forget-key');
+        assert.equal(await page.evaluate(() => window.notices.at(-1)), 'Key removed.');
         assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('qa-server-settings')).canary.mimoKey), undefined);
         await page.setViewportSize({ width: 390, height: 844 });
         const overflow = await page.locator('.canary-settings').evaluate(el => el.scrollWidth > el.clientWidth + 1);

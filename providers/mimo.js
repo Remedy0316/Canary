@@ -91,7 +91,13 @@ export class MimoProvider {
             this.stopFromUi();
             this.host.keys.set(get('canary-key').value, get('canary-remember').checked);
             get('canary-remember').checked = this.host.keys.remember;
-            this.status(this.host.keys.value ? 'Key saved. Ready to stream.' : 'Enter a MiMo API key.');
+            if (!this.host.keys.value) {
+                this.status('Enter a MiMo API key.');
+                this.host.notify('Enter a MiMo API key before saving.');
+                return;
+            }
+            this.status('Key saved. Ready to stream.');
+            this.host.notifySuccess(this.host.keys.remember ? 'Key saved to this SillyTavern account.' : 'Key saved until this page closes or reloads.');
         });
         on('canary-forget-key', 'click', () => {
             this.stopFromUi();
@@ -99,6 +105,7 @@ export class MimoProvider {
             get('canary-remember').checked = false;
             this.host.keys.clear();
             this.status('Key removed.');
+            this.host.notifySuccess('Key removed.');
         });
         on('canary-instructions', 'input', () => {
             this.settings.instructions = get('canary-instructions').value;
