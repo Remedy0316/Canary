@@ -232,6 +232,14 @@ export class StreamingProvider {
             if (event.target?.id === 'tts_provider' || (event.target?.id === 'tts_enabled' && !event.target.checked)) this.stopFromUi();
         }, options);
         window.addEventListener('pagehide', () => this.cancel(), { signal: this.listeners.signal });
+        // iOS resumes audio only inside a user gesture, and suspends it whenever the
+        // app is backgrounded, the screen locks or another app takes the audio. While
+        // audio is playing or expected unprompted, let any tap restore it.
+        const resumeOnGesture = () => {
+            if (this.context?.state === 'running' || !(this.run || this.host.autoNarrates?.())) return;
+            void this.unlockAudio().catch(() => {});
+        };
+        for (const type of ['touchend', 'click', 'keydown']) document.addEventListener(type, resumeOnGesture, options);
         const { eventSource, event_types } = this.host;
         for (const name of ['CHAT_CHANGED', 'MESSAGE_SWIPED', 'MESSAGE_DELETED', 'GROUP_UPDATED']) {
             if (!event_types[name]) continue;
@@ -257,6 +265,9 @@ export class StreamingProvider {
         if (!this.context || this.context.state === 'closed') {
             const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
             if (!Context) throw new Error('This browser does not support streaming audio.');
+            // iOS treats Web Audio like a ringtone, muted by the silent switch, unless
+            // the page declares media playback before the context starts.
+            if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
             this.context = new Context({ latencyHint: 'interactive' });
         }
         if (this.context.state !== 'running') {
@@ -328,7 +339,10 @@ export class StreamingProvider {
             this.status('Finished. Ready to stream.');
         } catch (error) {
             if (signal.aborted && signal.reason?.name === 'AbortError') return;
-            const failure = signal.aborted ? signal.reason : error;
+            let failure = signal.aborted ? signal.reason : error;
+            // A suspended context (iOS screen lock or backgrounding) stalls the queue until
+            // the idle timer fires or the stream drops. Report the real cause.
+            if (run.player && this.context?.state !== 'running') failure = new Error('Audio was interrupted, for example by the screen locking or another app. Try again.');
             this.status(failure.message || 'Speech generation failed.', 'error');
             throw failure;
         } finally {

@@ -78,7 +78,7 @@ Long passages are split at a client policy of 3,000 Unicode code points per requ
 
 - **Streaming buffer:** 80, 120 (default), or 250 ms. This is the local playback buffer, not a promise about the provider's server latency. A larger buffer can absorb small network delays.
 - **Playback speed (MiMo):** Uses SillyTavern's **Audio Playback Speed** slider when each speech job starts, clamped to 0.5–2×. MiMo audio is played faster or slower, which also shifts pitch. MiniMax uses its own **Speed** setting instead.
-- **Enable audio:** Click once if the browser blocks automatic audio. Preview and native narration clicks also attempt to enable it.
+- **Enable audio:** Click once if the browser blocks automatic audio. Preview and native narration clicks also attempt to enable it, and while automatic narration is on (or audio is playing), any tap or key press on the page does too.
 - **Stop:** Canary's Stop button and SillyTavern's native TTS Stop cancel both playback and the HTTP stream. Chat changes, swipes, provider changes, and disabling TTS also stop playback.
 - **Automatic narration:** Uses SillyTavern's existing settings. To start narrating paragraphs while a chat response is still being written, enable its **Auto Generation** and **Narrate by paragraphs (when streaming)** options. This is separate from streaming the audio of each passage.
 
@@ -106,6 +106,7 @@ Keys are kept in a separate `canary` settings entry (`mimoKey`, `minimaxKey`), n
 - Canary observes the native `#tts_audio` source reset to catch programmatic cancellation such as `/speak`. This integration depends on SillyTavern's current TTS implementation and is covered by the upstream integration harness.
 - The providers register before native TTS activation to support restoring a saved Canary selection after reload. The manifest's loading order and activation hook are intentional.
 - Browser background playback and mobile audio activation depend on the browser/OS. Installed iPhone/PWA behavior needs physical-device confirmation.
+- **iPhone and iPad:** Canary declares its audio as media playback (iOS 16.4+), so it plays with the silent switch on and pauses other apps' audio while it speaks, like a podcast. iOS pauses Web Audio when the screen locks or the app goes to the background; tap the page on return to resume. After 45 seconds paused, Canary stops that narration and reports the interruption.
 - This release supports preset-voice `mimo-v2.5-tts`. MiMo voice design and voice cloning are not included.
 - MiniMax cloned and designed voices can be used once created on the MiniMax platform; Canary does not create them. Pronunciation dictionaries, voice mixing and subtitles are not included.
 - If MiMo or MiniMax changes its browser CORS policy, direct requests may stop working. Canary reports connection failures rather than sending keys through a third-party proxy.

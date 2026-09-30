@@ -34,6 +34,7 @@ export async function initialize() {
                         saveSettings: () => tts.saveTtsProviderSettings(),
                         refreshVoiceMap: () => tts.initVoiceMap?.().catch(() => {}),
                         getPlaybackRate: () => context.extensionSettings.tts?.playback_rate || 1,
+                        autoNarrates: () => Boolean(context.extensionSettings.tts?.enabled && context.extensionSettings.tts?.auto_generation),
                         notify: message => toastr.error(message, 'Canary'),
                         notifySuccess: message => toastr.success(message, 'Canary'),
                     });
