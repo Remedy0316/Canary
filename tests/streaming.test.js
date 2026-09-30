@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readSse } from '../lib/sse.js';
-import { buildRequest, splitText, streamSpeech } from '../lib/mimo-api.js';
+import { buildRequest, streamSpeech } from '../lib/mimo-api.js';
+import { splitText } from '../lib/text.js';
 import { PcmDecoder, PcmPlayer } from '../lib/pcm-player.js';
 import { KeyStore } from '../lib/key-store.js';
 
@@ -115,7 +116,7 @@ test('Web Audio schedules contiguous buffers and Stop terminates every source', 
 
 test('long text splitting preserves content and Unicode without exceeding policy limit', () => {
     const text = ('Hello world. 你好！🙂 More words, another clause; '.repeat(150)).trim();
-    const pieces = splitText(text);
+    const pieces = splitText(text, 1200);
     assert.ok(pieces.length > 1);
     assert.ok(pieces.every(piece => Array.from(piece).length <= 1200));
     assert.equal(pieces.join('').replace(/\s/g, ''), text.replace(/\s/g, ''));
@@ -128,13 +129,13 @@ test('keys are session-only by default, remembered only in account settings, and
     const save = () => saves++;
     const map = new Map();
     const storage = { getItem: k => map.get(k), setItem: (k, v) => map.set(k, v), removeItem: k => map.delete(k) };
-    const a = new KeyStore({ settings, save, account: 'alice', storage });
+    const a = new KeyStore({ settings, save, field: 'mimoKey', account: 'alice', storage, legacyPrefix: 'canary:mimo:key:' });
     a.set('session', false);
     assert.equal(settings.canary.mimoKey, undefined);
     a.set('remembered', true);
     assert.equal(settings.canary.mimoKey, 'remembered');
     assert.ok(!JSON.stringify(settings.tts).includes('remembered'), 'Keys must stay out of logged TTS provider settings');
-    const reloaded = new KeyStore({ settings, save, account: 'alice', storage });
+    const reloaded = new KeyStore({ settings, save, field: 'mimoKey', account: 'alice', storage, legacyPrefix: 'canary:mimo:key:' });
     assert.equal(reloaded.value, 'remembered');
     assert.equal(reloaded.remember, true);
     a.set('replacement', false);
@@ -145,11 +146,11 @@ test('keys are session-only by default, remembered only in account settings, and
 
     map.set('canary:mimo:key:bob', 'legacy');
     const bobSettings = {};
-    const bob = new KeyStore({ settings: bobSettings, save, account: 'bob', storage });
+    const bob = new KeyStore({ settings: bobSettings, save, field: 'mimoKey', account: 'bob', storage, legacyPrefix: 'canary:mimo:key:' });
     assert.equal(bob.value, 'legacy');
     assert.equal(bobSettings.canary.mimoKey, 'legacy');
     assert.equal(map.size, 0, 'Migrated browser key is removed');
     map.set('canary:mimo:key:bob', 'older');
-    assert.equal(new KeyStore({ settings: bobSettings, save, account: 'bob', storage }).value, 'legacy', 'Server key wins over a stale browser key');
+    assert.equal(new KeyStore({ settings: bobSettings, save, field: 'mimoKey', account: 'bob', storage, legacyPrefix: 'canary:mimo:key:' }).value, 'legacy', 'Server key wins over a stale browser key');
     assert.equal(map.size, 0);
 });

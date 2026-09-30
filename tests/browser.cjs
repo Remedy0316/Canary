@@ -62,18 +62,66 @@ settings.canary=JSON.parse(sessionStorage.getItem('qa-server-settings')||'{}').c
 window.ctx={eventSource:bus,event_types:events,extensionSettings:settings,saveSettingsDebounced:()=>sessionStorage.setItem('qa-server-settings',JSON.stringify(settings)),chatId:'test-chat',groupId:null,characterId:0,name1:'You',name2:'Alice',characters:[{name:'Alice'}],groups:[],chat:[{name:'Alice',mes:'Hello from Alice.',is_user:false}]};
 window.SillyTavern={getContext:()=>ctx};
 const nativeFetch=window.fetch;window.mockMode='normal';
-window.fetch=(url,opts)=>nativeFetch(typeof url==='string'&&url==='https://api.xiaomimimo.com/v1/chat/completions'?'/mock/mimo?mode='+window.mockMode:url,opts);
+window.fetch=(url,opts)=>{
+ if(typeof url==='string'&&url==='https://api.xiaomimimo.com/v1/chat/completions')url='/mock/mimo?mode='+window.mockMode;
+ const minimax=typeof url==='string'&&url.match(/^https:\/\/api\.(minimax\.io|minimaxi\.com)\/v1\/(t2a_v2|get_voice)$/);
+ if(minimax)url='/mock/minimax/'+(minimax[1]==='minimax.io'?'global':'mainland')+'/'+minimax[2]+'?mode='+window.mockMode;
+ return nativeFetch(url,opts);
+};
 window.audioStarts=[];window.audioStops=0;
 const createSource=AudioContext.prototype.createBufferSource;
-AudioContext.prototype.createBufferSource=function(){const s=createSource.call(this);const start=s.start.bind(s),stop=s.stop.bind(s);s.start=t=>{audioStarts.push({at:performance.now(),time:t,duration:s.buffer.duration});return start(t)};s.stop=()=>{audioStops++;return stop()};return s};
+AudioContext.prototype.createBufferSource=function(){const s=createSource.call(this);const start=s.start.bind(s),stop=s.stop.bind(s);s.start=t=>{audioStarts.push({at:performance.now(),time:t,duration:s.buffer.duration,rate:s.playbackRate.value});return start(t)};s.stop=()=>{audioStops++;return stop()};return s};
 </script><script type="module">
 try {const canary=await import('/canary/index.js');await canary.initialize();const tts=await import('/scripts/extensions/tts/index.js');await tts.init();await bus.emit('APP_READY');window.fixtureReady=true;}catch(e){window.fixtureError=e.stack;}
 </script></html>`;
 
 const requests = [];
+const minimaxRequests = [];
 const mockTimers = new Set();
+const tone = () => {
+    const pcm = Buffer.alloc(8640);
+    for (let i = 0; i < 4320; i++) pcm.writeInt16LE(Math.round(Math.sin(i * Math.PI * 2 * 220 / 24000) * 500), i * 2);
+    return pcm;
+};
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/mock/minimax/')) {
+        const [region, endpoint] = url.pathname.split('/').slice(3);
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            const record = { region, endpoint, auth: req.headers.authorization, body: JSON.parse(body), completed: false, closed: false, mode: url.searchParams.get('mode') };
+            minimaxRequests.push(record);
+            const ok = { status_code: 0, status_msg: 'success' };
+            if (endpoint === 'get_voice') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ system_voice: [{ voice_id: 'English_expressive_narrator' }, { voice_id: 'English_CalmWoman' }], voice_cloning: [{ voice_id: 'qa-clone' }], base_resp: ok }));
+                return;
+            }
+            // MiniMax reports authentication failures as HTTP 200 JSON.
+            if (record.mode === 'unauthorized') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ base_resp: { status_code: 1004, status_msg: 'private text must never reach UI' } }));
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+            res.flushHeaders();
+            const sent = [];
+            const timer = setInterval(() => {
+                const pcm = tone();
+                sent.push(pcm);
+                res.write('data: ' + JSON.stringify({ data: { audio: pcm.toString('hex'), status: 1 }, base_resp: { status_code: 0, status_msg: '' } }) + '\n\n');
+                if (sent.length >= (record.mode === 'short' ? 1 : 18)) {
+                    record.completed = true;
+                    // The final event repeats every chunk as one aggregated clip.
+                    res.end('data: ' + JSON.stringify({ data: { audio: Buffer.concat(sent).toString('hex'), status: 2 }, extra_info: { audio_length: 1 }, base_resp: ok }) + '\n\n');
+                }
+            }, 180);
+            mockTimers.add(timer);
+            res.on('close', () => { record.closed = true; clearInterval(timer); mockTimers.delete(timer); });
+        });
+        return;
+    }
     if (url.pathname === '/mock/mimo') {
         let body = '';
         req.on('data', chunk => body += chunk);
@@ -114,6 +162,14 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': type });
     res.end(content);
 });
+
+async function waitUntil(check, ms = 5000) {
+    const end = Date.now() + ms;
+    while (!check()) {
+        if (Date.now() > end) throw new Error('Timed out waiting for a mock request');
+        await new Promise(resolve => setTimeout(resolve, 25));
+    }
+}
 
 let browser;
 let context;
@@ -297,6 +353,79 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.screenshot({ path: path.join(root, '.qa', 'canary-mobile.png'), fullPage: true });
         assert.deepEqual(pageErrors, []);
         console.log('PASS key remembering/removal, mobile layout, no uncaught browser errors');
+
+        await page.setViewportSize({ width: 1100, height: 1000 });
+        await page.evaluate(() => { window.mockMode = 'normal'; window.ctx.chat[0].mes = 'Hello from Alice.'; });
+        await page.selectOption('#tts_provider', 'MiniMax (Canary)');
+        assert.equal(await page.inputValue('#canary-key'), '', 'MiniMax has its own key field');
+        assert.equal(await page.inputValue('#canary-model'), 'speech-2.8-hd');
+        assert.equal(await page.inputValue('#canary-emotion'), '');
+        assert.ok(await page.locator('#canary-preview-voice option').count() >= 100, 'Built-in voices are listed without a key');
+        await page.locator('#canary-key').fill('qa-minimax-key');
+        await page.check('#canary-remember');
+        await page.click('#canary-save-key');
+        await page.waitForFunction(() => document.querySelector('#canary-preview-voice option')?.value === 'qa-clone');
+        assert.equal(await page.inputValue('#canary-preview-voice'), 'English_expressive_narrator');
+        const voiceRequest = minimaxRequests.at(-1);
+        assert.deepEqual([voiceRequest.endpoint, voiceRequest.region, voiceRequest.auth], ['get_voice', 'global', 'Bearer qa-minimax-key']);
+        assert.equal(await page.evaluate(() => window.settings.canary.minimaxKey), 'qa-minimax-key');
+        assert.equal(await page.evaluate(() => window.settings.canary.mimoKey), undefined);
+        assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings.tts))).includes('qa-minimax-key'));
+        await page.waitForFunction(() => [...document.querySelectorAll('#tts_voicemap_char_Alice_voice option')].some(o => o.value === 'qa-clone'));
+        await page.selectOption('#tts_voicemap_char_Alice_voice', 'qa-clone');
+        console.log('PASS MiniMax key is separate and account voices, including cloned voices, reach the voice map');
+
+        await page.click('.mes_narrate');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.dataset.state === 'playing');
+        const narration = minimaxRequests.at(-1);
+        assert.equal(narration.endpoint, 't2a_v2');
+        assert.equal(narration.completed, false, 'MiniMax audio must start before the HTTP stream completes');
+        assert.equal(narration.body.model, 'speech-2.8-hd');
+        assert.equal(narration.body.stream, true);
+        assert.deepEqual(narration.body.stream_options, { exclude_aggregated_audio: true });
+        assert.deepEqual(narration.body.voice_setting, { voice_id: 'qa-clone', speed: 1 });
+        assert.deepEqual(narration.body.audio_setting, { sample_rate: 24000, format: 'pcm', channel: 1 });
+        assert.equal(narration.body.text, 'Hello from Alice.');
+        await page.click('#tts_media_control');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Stopped.');
+        await page.waitForTimeout(300);
+        assert.equal(narration.closed, true);
+        console.log('PASS MiniMax narration streams before completion and native Stop closes the stream');
+
+        await page.evaluate(() => { window.mockMode = 'short'; window.settings.tts.playback_rate = 1.5; });
+        await page.selectOption('#canary-emotion', 'calm');
+        await page.locator('#canary-custom-model').fill('speech-9-qa');
+        const startsBefore = await page.evaluate(() => window.audioStarts.length);
+        await page.click('#canary-preview');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        const previewStarts = await page.evaluate(count => window.audioStarts.slice(count), startsBefore);
+        assert.equal(previewStarts.length, 1, 'The aggregated final event must not replay the passage');
+        assert.equal(previewStarts[0].rate, 1, 'MiniMax applies speed natively instead of resampling');
+        const preview = minimaxRequests.at(-1).body;
+        assert.equal(preview.model, 'speech-9-qa');
+        assert.deepEqual(preview.voice_setting, { voice_id: 'English_expressive_narrator', speed: 1.5, emotion: 'calm' });
+        await page.evaluate(() => { window.settings.tts.playback_rate = 1; });
+        console.log('PASS MiniMax emotion, custom model and native speed; final aggregated audio is not replayed');
+
+        await page.selectOption('#canary-region', 'mainland');
+        await waitUntil(() => minimaxRequests.at(-1).endpoint === 'get_voice' && minimaxRequests.at(-1).region === 'mainland');
+        await page.evaluate(() => window.mockMode = 'unauthorized');
+        await page.click('#canary-preview');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.dataset.state === 'error');
+        assert.equal(minimaxRequests.at(-1).region, 'mainland');
+        assert.ok((await page.textContent('#canary-status')).includes('API key'));
+        assert.ok(!(await page.textContent('body')).includes('private text'));
+        console.log('PASS MiniMax region switch and redacted HTTP 200 authentication error');
+
+        await page.selectOption('#tts_provider', 'Xiaomi MiMo (Canary)');
+        assert.equal(await page.inputValue('#canary-key'), '');
+        assert.equal(await page.locator('#canary-preview-voice option').count(), 8);
+        await page.selectOption('#tts_provider', 'MiniMax (Canary)');
+        assert.equal(await page.inputValue('#canary-key'), 'qa-minimax-key');
+        assert.equal(await page.inputValue('#canary-region'), 'mainland');
+        assert.equal(await page.inputValue('#canary-emotion'), 'calm');
+        assert.deepEqual(pageErrors, []);
+        console.log('PASS switching between Canary providers keeps keys and settings separate');
     } finally {
         await cleanup();
         console.log('CLEANUP browser, context, pages, mock streams and server closed');
