@@ -12,7 +12,7 @@ Requires **SillyTavern 1.19.0 or newer**, its built-in **TTS** extension enabled
 2. Paste `https://github.com/Remedy0316/Canary`.
 3. Install and reload SillyTavern.
 4. Open **TTS**, enable it, and select **Xiaomi MiMo (Canary)**.
-5. Enter your MiMo API key and click **Save key**.
+5. Enter your MiMo API key, tick **Remember for this SillyTavern account** if you want it kept across reloads and devices, and click **Save key**.
 6. Assign a voice to **[Default Voice]** and/or individual characters in the native voice map.
 7. Click **Preview** to check speech. Use SillyTavern's message narration or TTS playback controls to read a message.
 
@@ -43,9 +43,11 @@ Canary aborts after 45 seconds without new audio, or after ten minutes for a sin
 
 Keys are kept in memory for the current page session by default. Switching providers preserves the session key; reloading or closing the page clears it.
 
-**Remember on this browser** optionally stores the key in browser local storage, separated by SillyTavern account handle. **Forget key** removes it. This storage is not encrypted and is accessible to scripts and extensions running on the same site. Browser storage failures are reported in the UI.
+**Remember for this SillyTavern account** saves the key in that account's SillyTavern settings on the server (`data/<user-handle>/settings.json`), so it works on any device you sign in from. **Forget key** removes it. Keys remembered on the browser by earlier Canary versions are moved into the account settings on first load, then deleted from the browser.
 
-Keys are excluded from Canary's SillyTavern provider settings, which SillyTavern can save and log. Canary does not embed shared credentials, send your browser cookies to MiMo, or save generated audio files. MiMo receives the text being narrated, the optional delivery instructions, and your API key. Its service terms and usage limits apply.
+The saved key is protected only by SillyTavern's own access control: anyone who can sign in to that account (basic auth or user-account login) can retrieve it, and so can scripts and extensions running in SillyTavern. It is stored unencrypted, and also appears in SillyTavern's automatic settings backups (`data/<user-handle>/backups`) and in anything with access to your server's data volume.
+
+Keys are kept in a separate `canary` settings entry, never in the TTS provider settings object, which SillyTavern logs to the browser console on save. Canary does not embed shared credentials, send your browser cookies to MiMo, or save generated audio files. MiMo receives the text being narrated, the optional delivery instructions, and your API key. Its service terms and usage limits apply.
 
 ## Compatibility and limits
 
@@ -92,7 +94,7 @@ providers/mimo.js        Settings, voice mapping contract, playback lifecycle
 lib/mimo-api.js          MiMo request format, stream validation, text splitting
 lib/sse.js               Incremental server-sent event parser
 lib/pcm-player.js        PCM conversion and continuous Web Audio scheduling
-lib/key-store.js         Session and optional browser key storage
+lib/key-store.js         Session and optional account-settings key storage
 ```
 
 New providers can be added as independent adapters and registered from `index.js`.

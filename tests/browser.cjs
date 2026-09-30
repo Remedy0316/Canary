@@ -57,7 +57,9 @@ window.errors=[];window.toastr={error:m=>window.errors.push(String(m)),info:()=>
 window.events=new Proxy({},{get:(_,p)=>p});
 window.bus={handlers:{},ready:false,on(e,fn){(this.handlers[e]??=[]).push(fn);if(e==='APP_READY'&&this.ready)void fn()},makeLast(e,fn){this.on(e,fn)},removeListener(e,fn){this.handlers[e]=(this.handlers[e]||[]).filter(f=>f!==fn)},async emit(e,...args){if(e==='APP_READY')this.ready=true;for(const fn of [...(this.handlers[e]||[])])await fn(...args)}};
 window.settings={tts:{enabled:true,currentProvider:new URLSearchParams(location.search).has('restore')?'Xiaomi MiMo (Canary)':'Edge',auto_generation:false,playback_rate:1,'Xiaomi MiMo (Canary)':{voiceMap:{'[Default Voice]':'Mia',Alice:'Mia'}}}};
-window.ctx={eventSource:bus,event_types:events,extensionSettings:settings,chatId:'test-chat',groupId:null,characterId:0,name1:'You',name2:'Alice',characters:[{name:'Alice'}],groups:[],chat:[{name:'Alice',mes:'Hello from Alice.',is_user:false}]};
+// sessionStorage stands in for the server copy of settings.json across reloads.
+settings.canary=JSON.parse(sessionStorage.getItem('qa-server-settings')||'{}').canary;
+window.ctx={eventSource:bus,event_types:events,extensionSettings:settings,saveSettingsDebounced:()=>sessionStorage.setItem('qa-server-settings',JSON.stringify(settings)),chatId:'test-chat',groupId:null,characterId:0,name1:'You',name2:'Alice',characters:[{name:'Alice'}],groups:[],chat:[{name:'Alice',mes:'Hello from Alice.',is_user:false}]};
 window.SillyTavern={getContext:()=>ctx};
 const nativeFetch=window.fetch;window.mockMode='normal';
 window.fetch=(url,opts)=>nativeFetch(typeof url==='string'&&url==='https://api.xiaomimimo.com/v1/chat/completions'?'/mock/mimo?mode='+window.mockMode:url,opts);
@@ -268,7 +270,9 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
 
         await page.check('#canary-remember');
         await page.click('#canary-save-key');
-        assert.equal(await page.evaluate(() => localStorage.getItem('canary:mimo:key:qa-user')), 'qa-key-never-real');
+        assert.equal(await page.evaluate(() => window.settings.canary.mimoKey), 'qa-key-never-real');
+        assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings.tts))).includes('qa-key-never-real'));
+        assert.equal(await page.evaluate(() => localStorage.length), 0);
         await page.goto(`http://127.0.0.1:${server.address().port}/?restore`);
         await page.waitForFunction(() => window.fixtureReady || window.fixtureError);
         assert.equal(await page.evaluate(() => window.fixtureError), undefined);
@@ -283,7 +287,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.selectOption('#tts_provider', 'Xiaomi MiMo (Canary)');
         console.log('PASS provider change during native narration');
         await page.click('#canary-forget-key');
-        assert.equal(await page.evaluate(() => localStorage.getItem('canary:mimo:key:qa-user')), null);
+        assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('qa-server-settings')).canary.mimoKey), undefined);
         await page.setViewportSize({ width: 390, height: 844 });
         const overflow = await page.locator('.canary-settings').evaluate(el => el.scrollWidth > el.clientWidth + 1);
         assert.equal(overflow, false);

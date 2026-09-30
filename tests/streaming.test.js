@@ -122,17 +122,34 @@ test('long text splitting preserves content and Unicode without exceeding policy
     assert.ok(!pieces.join('').includes('\uFFFD'));
 });
 
-test('keys are account-scoped, session-only by default, and removed when remembering is disabled', () => {
+test('keys are session-only by default, remembered only in account settings, and migrated from browser storage', () => {
+    const settings = { tts: { 'Xiaomi MiMo (Canary)': { voiceMap: {} } } };
+    let saves = 0;
+    const save = () => saves++;
     const map = new Map();
     const storage = { getItem: k => map.get(k), setItem: (k, v) => map.set(k, v), removeItem: k => map.delete(k) };
-    const a = new KeyStore('alice', storage);
+    const a = new KeyStore({ settings, save, account: 'alice', storage });
     a.set('session', false);
-    assert.equal(map.size, 0);
+    assert.equal(settings.canary.mimoKey, undefined);
     a.set('remembered', true);
-    assert.equal(new KeyStore('alice', storage).value, 'remembered');
-    assert.equal(new KeyStore('bob', storage).value, '');
+    assert.equal(settings.canary.mimoKey, 'remembered');
+    assert.ok(!JSON.stringify(settings.tts).includes('remembered'), 'Keys must stay out of logged TTS provider settings');
+    const reloaded = new KeyStore({ settings, save, account: 'alice', storage });
+    assert.equal(reloaded.value, 'remembered');
+    assert.equal(reloaded.remember, true);
     a.set('replacement', false);
-    assert.equal(map.size, 0);
+    assert.equal(settings.canary.mimoKey, undefined);
     a.clear();
     assert.equal(a.value, '');
+    assert.equal(saves, 4);
+
+    map.set('canary:mimo:key:bob', 'legacy');
+    const bobSettings = {};
+    const bob = new KeyStore({ settings: bobSettings, save, account: 'bob', storage });
+    assert.equal(bob.value, 'legacy');
+    assert.equal(bobSettings.canary.mimoKey, 'legacy');
+    assert.equal(map.size, 0, 'Migrated browser key is removed');
+    map.set('canary:mimo:key:bob', 'older');
+    assert.equal(new KeyStore({ settings: bobSettings, save, account: 'bob', storage }).value, 'legacy', 'Server key wins over a stale browser key');
+    assert.equal(map.size, 0);
 });

@@ -11,7 +11,11 @@ export async function initialize() {
         const tts = await import('/scripts/extensions/tts/index.js');
         const { getCurrentUserHandle } = await import('/scripts/user.js');
         if (typeof tts.registerTtsProvider !== 'function') throw new Error('Canary requires SillyTavern 1.19.0 or newer with the TTS extension enabled.');
-        const keys = new KeyStore(getCurrentUserHandle());
+        const keys = new KeyStore({
+            settings: context.extensionSettings,
+            save: () => context.saveSettingsDebounced(),
+            account: getCurrentUserHandle(),
+        });
         let activeProvider;
         const Provider = class extends MimoProvider {
             constructor() {

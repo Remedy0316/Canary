@@ -26,8 +26,8 @@ export class MimoProvider {
             <p class="canary-help">Canary streams MiMo speech directly to this browser.</p>
             <label for="canary-key">MiMo API key</label>
             <input id="canary-key" class="text_pole" type="password" autocomplete="off" spellcheck="false" placeholder="Enter your MiMo API key" />
-            <label class="canary-remember"><input id="canary-remember" type="checkbox" /> Remember on this browser</label>
-            <p class="canary-help">Otherwise the key lasts until this page closes or reloads. Remembered keys are stored on this browser for this account, and are accessible to scripts on this site.</p>
+            <label class="canary-remember"><input id="canary-remember" type="checkbox" /> Remember for this SillyTavern account</label>
+            <p class="canary-help">Otherwise the key lasts until this page closes or reloads. Remembered keys are saved unencrypted in this account’s SillyTavern settings on the server and work on any device you sign in from.</p>
             <div class="canary-actions">
                 <button id="canary-save-key" class="menu_button" type="button">Save key</button>
                 <button id="canary-forget-key" class="menu_button" type="button">Forget key</button>
@@ -89,20 +89,16 @@ export class MimoProvider {
         get('canary-preview-voice').value = 'Mia';
         on('canary-save-key', 'click', () => {
             this.stopFromUi();
-            try {
-                this.host.keys.set(get('canary-key').value, get('canary-remember').checked);
-                this.status(this.host.keys.value ? 'Key saved. Ready to stream.' : 'Enter a MiMo API key.');
-            } catch {
-                get('canary-remember').checked = false;
-                this.status('Browser storage is unavailable. The entered key is usable for this page session; any previously saved key may still exist.', 'error');
-            }
+            this.host.keys.set(get('canary-key').value, get('canary-remember').checked);
+            get('canary-remember').checked = this.host.keys.remember;
+            this.status(this.host.keys.value ? 'Key saved. Ready to stream.' : 'Enter a MiMo API key.');
         });
         on('canary-forget-key', 'click', () => {
             this.stopFromUi();
             get('canary-key').value = '';
             get('canary-remember').checked = false;
-            try { this.host.keys.clear(); this.status('Key removed.'); }
-            catch { this.status('Session key cleared. Browser storage blocked removal of any saved key.', 'error'); }
+            this.host.keys.clear();
+            this.status('Key removed.');
         });
         on('canary-instructions', 'input', () => {
             this.settings.instructions = get('canary-instructions').value;
