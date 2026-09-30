@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
                 for (let i = 0; i < 4320; i++) pcm.writeInt16LE(Math.round(Math.sin(i * Math.PI * 2 * 220 / 24000) * 500), i * 2);
                 res.write('data: ' + JSON.stringify({ choices: [{ delta: { audio: { data: pcm.toString('base64') } } }] }) + '\r\n\r\n');
                 index++;
-                if (index >= 18) { record.completed = true; res.end('data: [DONE]\n\n'); }
+                if (index >= (record.mode === 'short' ? 1 : 18)) { record.completed = true; res.end('data: [DONE]\n\n'); }
             }, 180);
             mockTimers.add(timer);
             res.on('close', () => { record.closed = true; clearInterval(timer); mockTimers.delete(timer); });
@@ -145,6 +145,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.locator('#canary-key').fill('qa-key-never-real');
         await page.click('#canary-save-key');
         assert.equal(await page.locator('#canary-preview-voice option').count(), 8);
+        assert.equal(await page.inputValue('#canary-preview-language'), 'bilingual');
         await page.locator('#canary-instructions').fill('Speak calmly.');
         assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings))).includes('qa-key-never-real'));
         assert.equal(await page.evaluate(() => localStorage.length), 0);
@@ -204,6 +205,39 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
         assert.equal(requests.at(-1).completed, true);
         console.log('PASS complete streamed preview drains playback');
+
+        await page.evaluate(() => window.mockMode = 'short');
+        const voices = ['冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean'];
+        assert.deepEqual(await page.locator('#canary-preview-voice option').allTextContents(), voices);
+        for (const voice of voices) {
+            await page.selectOption('#canary-preview-voice', voice);
+            for (const language of ['en', 'zh', 'bilingual']) {
+                await page.selectOption('#canary-preview-language', language);
+                const count = requests.length;
+                await page.click('#canary-preview');
+                await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+                assert.equal(requests.length, count + 1);
+                const request = requests.at(-1).body;
+                const sample = request.messages.at(-1).content;
+                assert.equal(request.audio.voice, voice);
+                assert.equal(/[\u4e00-\u9fff]/u.test(sample), language !== 'en');
+                assert.equal(/[a-z]/i.test(sample), language !== 'zh');
+                assert.equal(request.language, undefined);
+            }
+        }
+        await page.selectOption('#canary-preview-language', 'zh');
+        await page.selectOption('#tts_provider', 'Edge');
+        await page.selectOption('#tts_provider', 'Xiaomi MiMo (Canary)');
+        assert.equal(await page.inputValue('#canary-preview-language'), 'zh');
+        assert.equal(await page.inputValue('#tts_voicemap_char_Alice_voice'), 'Mia');
+        const mixedText = 'Hello, Alice. 你好，今天我们开始新的故事。';
+        await page.evaluate(text => { window.ctx.chat[0].mes = text; }, mixedText);
+        await page.click('.mes_narrate');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        assert.equal(requests.at(-1).body.audio.voice, 'Mia');
+        assert.equal(requests.at(-1).body.messages.at(-1).content, mixedText);
+        await page.evaluate(() => window.mockMode = 'normal');
+        console.log('PASS all eight voices with English, Chinese and bilingual previews; preview preference persists and mixed narration preserves voice/text');
 
         // /speak resets the native audio element without a click on TTS controls.
         await page.click('.mes_narrate');

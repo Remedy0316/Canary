@@ -2,11 +2,16 @@ import { splitText, streamSpeech, VOICES } from '../lib/mimo-api.js';
 import { PcmPlayer } from '../lib/pcm-player.js';
 
 export const PROVIDER_NAME = 'Xiaomi MiMo (Canary)';
+const PREVIEW_TEXT = Object.freeze({
+    en: 'Hello. This is Canary, ready to bring your next story to life.',
+    zh: '你好，我是你的语音助手。很高兴与你一起开始新的故事。',
+    bilingual: 'Hello. This is Canary, ready for our next story. 你好，很高兴与你一起开始新的故事。',
+});
 
 export class MimoProvider {
     constructor(host) {
         this.host = host;
-        this.settings = { voiceMap: {}, instructions: '', bufferMs: 120 };
+        this.settings = { voiceMap: {}, instructions: '', bufferMs: 120, previewLanguage: 'bilingual' };
         this.voices = VOICES;
         this.separator = ' ';
         this.run = null;
@@ -37,6 +42,13 @@ export class MimoProvider {
             </select>
             <label for="canary-preview-voice">Preview voice</label>
             <select id="canary-preview-voice" class="text_pole"></select>
+            <p class="canary-help">Choose any of the eight voices for English, Chinese, or mixed text. Your selected voice stays the same across languages.</p>
+            <label for="canary-preview-language">Preview language / 试听语言</label>
+            <select id="canary-preview-language" class="text_pole">
+                <option value="bilingual">English + 中文</option>
+                <option value="en">English</option>
+                <option value="zh">中文</option>
+            </select>
             <div class="canary-actions">
                 <button id="canary-preview" class="menu_button" type="button">Preview</button>
                 <button id="canary-unlock" class="menu_button" type="button">Enable audio</button>
@@ -59,6 +71,7 @@ export class MimoProvider {
             voiceMap: typeof settings.voiceMap === 'string' || (settings.voiceMap && typeof settings.voiceMap === 'object') ? settings.voiceMap : {},
             instructions: typeof settings.instructions === 'string' ? settings.instructions.slice(0, 4000) : '',
             bufferMs: [80, 120, 250].includes(Number(settings.bufferMs)) ? Number(settings.bufferMs) : 120,
+            previewLanguage: Object.hasOwn(PREVIEW_TEXT, settings.previewLanguage) ? settings.previewLanguage : 'bilingual',
         };
         const get = id => document.getElementById(id);
         const on = (id, type, fn) => get(id)?.addEventListener(type, fn, { signal: this.listeners.signal });
@@ -66,10 +79,11 @@ export class MimoProvider {
         get('canary-remember').checked = this.host.keys.remember;
         get('canary-instructions').value = this.settings.instructions;
         get('canary-buffer').value = String(this.settings.bufferMs);
+        get('canary-preview-language').value = this.settings.previewLanguage;
         for (const voice of VOICES) {
             const option = document.createElement('option');
             option.value = voice.voice_id;
-            option.textContent = `${voice.name} (${voice.lang === 'zh-CN' ? 'Chinese' : 'English'})`;
+            option.textContent = voice.name;
             get('canary-preview-voice').append(option);
         }
         get('canary-preview-voice').value = 'Mia';
@@ -96,6 +110,10 @@ export class MimoProvider {
         });
         on('canary-buffer', 'change', () => {
             this.settings.bufferMs = Number(get('canary-buffer').value);
+            this.host.saveSettings();
+        });
+        on('canary-preview-language', 'change', () => {
+            this.settings.previewLanguage = get('canary-preview-language').value;
             this.host.saveSettings();
         });
         on('canary-preview', 'click', () => { void this.previewTtsVoice(get('canary-preview-voice').value); });
@@ -259,7 +277,7 @@ export class MimoProvider {
         if (this.run) { this.status('Stop the current playback before previewing a voice.'); return; }
         const voice = VOICES.find(item => item.voice_id === voiceId);
         if (!voice) return;
-        const text = voice.lang === 'zh-CN' ? '你好，我是你的语音助手。很高兴与你一起开始新的故事。' : 'Hello. This is Canary, ready to bring your next story to life.';
+        const text = PREVIEW_TEXT[this.settings.previewLanguage] || PREVIEW_TEXT.bilingual;
         try { await this.speak(text, voiceId, true); }
         catch (error) { this.host.notify(error.message || 'Voice preview failed.'); }
     }

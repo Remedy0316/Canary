@@ -26,7 +26,8 @@ Railway serves the extension files. Speech requests travel from your browser dir
 
 ## Using streaming
 
-- **Voices:** 冰糖, 茉莉, 苏打, 白桦, Mia, Chloe, Milo, Dean.
+- **Voices:** 冰糖, 茉莉, 苏打, 白桦, Mia, Chloe, Milo, Dean. All eight are available for English, Chinese, and mixed-language text. Canary preserves your selected voice across languages and sends the original text to MiMo without translation or a forced language parameter. Pronunciation and accent depend on MiMo.
+- **Preview language:** Choose **English**, **中文**, or **English + 中文** (default) independently of the voice. This setting changes only the preview sample; narration follows the actual message text. Existing character voice assignments are preserved.
 - **Voice delivery instructions:** Optional natural-language directions, such as speaking gently or using a particular emotion. Leave blank to let the model interpret the text.
 - **Streaming buffer:** 80, 120 (default), or 250 ms. This is the local playback buffer, not a promise about MiMo's server latency. A larger buffer can absorb small network delays.
 - **Playback speed:** Uses SillyTavern's playback-speed setting when each speech job starts, clamped to 0.5–2×.
