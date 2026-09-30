@@ -98,7 +98,7 @@ const server = http.createServer((req, res) => {
             const ok = { status_code: 0, status_msg: 'success' };
             if (endpoint === 'get_voice') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ system_voice: [{ voice_id: 'English_expressive_narrator' }, { voice_id: 'English_CalmWoman' }], voice_cloning: [{ voice_id: 'qa-clone' }], base_resp: ok }));
+                res.end(JSON.stringify({ system_voice: [{ voice_id: 'English_expressive_narrator', voice_name: 'Expressive Narrator' }, { voice_id: 'English_CalmWoman', voice_name: 'Calm Woman' }], voice_cloning: [{ voice_id: 'qa-clone' }], base_resp: ok }));
                 return;
             }
             // MiniMax reports authentication failures as HTTP 200 JSON.
@@ -423,6 +423,46 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(narration.closed, true);
         console.log('PASS MiniMax narration streams before completion and native Stop closes the stream');
 
+        const aliceOptions = () => page.locator('#tts_voicemap_char_Alice_voice option').evaluateAll(options => options.filter(o => !o.hidden).map(o => o.value));
+        assert.equal(await page.locator('#canary-preview-voice option[value="English_expressive_narrator"]').textContent(), 'Expressive Narrator · English_expressive_narrator');
+        assert.ok((await aliceOptions()).includes('Calm Woman · English_CalmWoman'), 'The voice map shows readable names');
+        await page.locator('#canary-voicemap-search').fill('calm');
+        assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'qa-clone', 'Calm Woman · English_CalmWoman'], 'Search keeps markers and the current choice');
+        await page.locator('#canary-voicemap-search').fill('');
+        assert.ok((await aliceOptions()).includes('Expressive Narrator · English_expressive_narrator'));
+        console.log('PASS MiniMax readable voice names and voice-map search');
+
+        await page.evaluate(() => window.mockMode = 'short');
+        await openSection('custom');
+        assert.equal(await page.textContent('#canary-custom-summary'), 'None');
+        await page.locator('#canary-custom-voice-id').fill('qa-hand-added');
+        await page.locator('#canary-custom-voice-nickname').fill('Hero');
+        await page.click('#canary-add-voice');
+        assert.equal(await page.textContent('#canary-custom-summary'), '1 added');
+        assert.equal(await page.textContent('#canary-custom-voice-list li span'), 'Hero · qa-hand-added');
+        assert.equal(await page.inputValue('#canary-preview-voice'), 'qa-hand-added');
+        assert.deepEqual(await page.locator('#canary-preview-voice optgroup[label="Your voices"] option').evaluateAll(o => o.map(x => x.value)), ['qa-hand-added', 'qa-clone']);
+        await page.waitForFunction(() => [...document.querySelectorAll('#tts_voicemap_char_Alice_voice option')].some(o => o.value === 'Hero · qa-hand-added'));
+        await page.selectOption('#tts_voicemap_char_Alice_voice', 'Hero · qa-hand-added');
+        await page.click('.mes_narrate');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        assert.equal(minimaxRequests.at(-1).body.voice_setting.voice_id, 'qa-hand-added', 'Custom voices send their ID');
+        // Renaming relabels the saved assignment; removing keeps it usable by ID.
+        await page.locator('#canary-custom-voice-id').fill('qa-hand-added');
+        await page.locator('#canary-custom-voice-nickname').fill('Hero 2');
+        await page.locator('#canary-custom-voice-nickname').press('Enter');
+        await page.waitForFunction(() => document.querySelector('#tts_voicemap_char_Alice_voice')?.value === 'Hero 2 · qa-hand-added');
+        assert.equal(await page.evaluate(() => window.settings.tts['MiniMax (Canary)'].voiceMap.Alice), 'Hero 2 · qa-hand-added');
+        await page.click('#canary-custom-voice-list button[data-voice-id="qa-hand-added"]');
+        assert.equal(await page.textContent('#canary-custom-summary'), 'None');
+        await page.waitForFunction(() => !document.querySelector('#canary-preview-voice option[value="qa-hand-added"]'));
+        await page.click('.mes_narrate');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        assert.equal(minimaxRequests.at(-1).body.voice_setting.voice_id, 'qa-hand-added', 'A removed custom voice still assigned in the map keeps working');
+        await page.selectOption('#canary-preview-voice', 'English_expressive_narrator');
+        await page.evaluate(() => window.mockMode = 'normal');
+        console.log('PASS MiniMax custom voices: add with nickname, use in the voice map, rename, remove');
+
         // SillyTavern's own slider value must be ignored by MiniMax.
         await page.evaluate(() => { window.mockMode = 'short'; window.settings.tts.playback_rate = 2.5; });
         const speedBox = page.locator('#canary-speed');
@@ -493,6 +533,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.inputValue('#canary-key'), '');
         assert.equal(await page.locator('#canary-preview-voice option').count(), 8);
         assert.equal(await page.locator('#playback_rate_block').isVisible(), true, 'Other providers keep SillyTavern’s speed slider');
+        assert.equal(await page.locator('#canary-voicemap-search').count(), 0, 'The voice-map search box leaves with MiniMax');
         await page.selectOption('#tts_provider', 'MiniMax (Canary)');
         assert.equal(await page.inputValue('#canary-key'), 'qa-minimax-key');
         assert.equal(await page.inputValue('#canary-region'), 'mainland');
@@ -504,6 +545,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · remembered · Mainland China');
         await page.setViewportSize({ width: 390, height: 844 });
         await openSection('tuning');
+        await openSection('custom');
         assert.equal(await page.locator('.canary-settings').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
         await page.locator('.canary-settings').screenshot({ path: path.join(root, '.qa', 'minimax-mobile.png') });
         assert.deepEqual(pageErrors, []);

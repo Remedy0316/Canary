@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILT_IN_VOICES, buildRequest, emotionWarning, fetchVoices, groupVoices, streamSpeech } from '../lib/minimax-api.js';
+import { BUILT_IN_VOICES, buildRequest, emotionWarning, fetchVoices, groupVoices, streamSpeech, voiceIdOf } from '../lib/minimax-api.js';
 import { KeyStore } from '../lib/key-store.js';
-import { MinimaxProvider } from '../providers/minimax.js';
+import { MinimaxProvider, parseCustomVoices } from '../providers/minimax.js';
 
 const encode = text => new TextEncoder().encode(text);
 const body = chunks => new ReadableStream({ start(c) { chunks.forEach(chunk => c.enqueue(encode(chunk))); c.close(); } });
@@ -89,14 +89,15 @@ test('MiniMax voice list puts cloned voices first and removes duplicates', async
     } });
     assert.equal(request.url, 'https://api.minimax.io/v1/get_voice');
     assert.deepEqual(request.body, { voice_type: 'all' });
-    assert.deepEqual(voices.map(voice => voice.name), ['my-clone', 'English_expressive_narrator']);
+    assert.deepEqual(voices.map(voice => voice.name), ['my-clone', 'Expressive Narrator · English_expressive_narrator']);
     await assert.rejects(fetchVoices({ key: 'k', region: 'global', fetchImpl: async () => json({ base_resp: { status_code: 2049, status_msg: 'x' } }) }), /API key/);
 });
 
-test('built-in voices use stable, unique voice IDs as names', () => {
+test('built-in voices have unique IDs and readable names that end with the ID', () => {
     const ids = BUILT_IN_VOICES.map(voice => voice.voice_id);
     assert.equal(new Set(ids).size, ids.length);
-    assert.ok(BUILT_IN_VOICES.every(voice => voice.name === voice.voice_id));
+    assert.ok(BUILT_IN_VOICES.every(voice => voice.name.endsWith(voice.voice_id) && voiceIdOf(voice.name) === voice.voice_id));
+    assert.equal(BUILT_IN_VOICES.find(voice => voice.voice_id === 'Arrogant_Miss').name, 'Arrogant Miss · Arrogant_Miss');
     assert.ok(ids.includes('English_expressive_narrator') && ids.includes('Chinese (Mandarin)_News_Anchor'));
 });
 
@@ -187,4 +188,35 @@ test('MiniMax speed setting is clamped, rounded and used instead of SillyTavern�
     assert.deepEqual(['3', '0.1', 'abc', 1.234, '0.75'].map(speed => provider.parseSettings({ speed }).speed), [2, 0.5, 1, 1.23, 0.75]);
     provider.settings = provider.parseSettings({ speed: 1.25 });
     assert.equal(provider.playbackSpeed(), 1.25);
+});
+
+test('custom voices are validated, deduplicated and listed first with nicknames', async () => {
+    assert.deepEqual(parseCustomVoices([{ id: ' a ', nickname: ' Hero ' }, { id: 'a' }, { id: 'x · y' }, { id: '' }, 'junk']), [{ id: 'a', nickname: 'Hero' }]);
+    const provider = new MinimaxProvider({ keys: { value: '' } });
+    provider.settings = provider.parseSettings({ customVoices: [{ id: 'my-clone', nickname: 'Hero' }, { id: 'English_CalmWoman', nickname: 'Mom' }, { id: 'bare-id' }] });
+    provider.voices = provider.composeVoices();
+    assert.deepEqual(provider.voices.slice(0, 3).map(voice => [voice.name, voice.group]), [
+        ['Hero · my-clone', 'Your voices'], ['Mom · English_CalmWoman', 'Your voices'], ['bare-id', 'Your voices'],
+    ]);
+    assert.equal(provider.voices.filter(voice => voice.voice_id === 'English_CalmWoman').length, 1, 'A nicknamed listed voice is not duplicated');
+    assert.equal(provider.composeVoices().length, BUILT_IN_VOICES.length + 2);
+});
+
+test('voice map entries saved as IDs or older labels are relabelled and still resolve', async () => {
+    globalThis.document ??= { getElementById: () => null };
+    const provider = new MinimaxProvider({ keys: { value: '' } });
+    const voiceMap = { '[Default Voice]': 'English_expressive_narrator', Alice: 'Old Nick · English_CalmWoman', Bob: 'disabled', Eve: 'unlisted-clone' };
+    provider.settings = provider.parseSettings({ voiceMap });
+    provider.voices = provider.composeVoices();
+    const names = (await provider.fetchTtsVoiceObjects()).map(voice => voice.name);
+    assert.deepEqual(voiceMap, {
+        '[Default Voice]': 'Expressive Narrator · English_expressive_narrator',
+        Alice: 'Calm Woman · English_CalmWoman',
+        Bob: 'disabled',
+        Eve: 'unlisted-clone',
+    });
+    assert.equal(names.at(-1), 'unlisted-clone');
+    assert.equal((await provider.getVoice('English_CalmWoman')).voice_id, 'English_CalmWoman');
+    assert.equal((await provider.getVoice('Old Nick · English_CalmWoman')).voice_id, 'English_CalmWoman');
+    assert.equal((await provider.getVoice('Gone · vanished-id')).voice_id, 'vanished-id');
 });

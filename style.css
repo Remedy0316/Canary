@@ -18,3 +18,10 @@
 .canary-settings .canary-remember { display: flex; align-items: center; gap: 0.5rem; }
 /* MiniMax (Canary) has its own Speed setting; hide SillyTavern's slider while it is active. */
 body.canary-own-speed #playback_rate_block { display: none !important; }
+.canary-settings .canary-voice-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.canary-settings .canary-voice-list:empty { display: none; }
+.canary-settings .canary-voice-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.canary-settings .canary-voice-list li span { min-width: 0; overflow-wrap: anywhere; }
+.canary-settings .canary-voice-list .menu_button { margin: 0; width: auto; flex: none; }
+.canary-voicemap-search { margin: 0.5rem 0; }
+.canary-voicemap-search input { width: 100%; max-width: 100%; box-sizing: border-box; }

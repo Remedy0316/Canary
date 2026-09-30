@@ -1,4 +1,4 @@
-import { BUILT_IN_VOICES, EMOTIONS, emotionWarning, fetchVoices, groupVoices, HOSTS, LANGUAGES, MODELS, streamSpeech, TEXT_LIMIT, YOUR_VOICES } from '../lib/minimax-api.js';
+import { BUILT_IN_VOICES, EMOTIONS, emotionWarning, fetchVoices, groupVoices, HOSTS, LANGUAGES, MODELS, streamSpeech, TEXT_LIMIT, voiceIdOf, voiceObject, YOUR_VOICES } from '../lib/minimax-api.js';
 import { splitText } from '../lib/text.js';
 import { bufferFieldHtml, keyFieldsHtml, previewFieldsHtml, sectionHtml, STATUS_HTML, StreamingProvider } from './streaming.js';
 
@@ -6,6 +6,20 @@ export const PROVIDER_NAME = 'MiniMax (Canary)';
 const VOICE_MAP_MARKERS = ['[Default Voice]', 'disabled'];
 const REGION_LABELS = Object.freeze({ global: 'Global', mainland: 'Mainland China' });
 const capitalize = text => text[0].toUpperCase() + text.slice(1);
+const MAX_CUSTOM_VOICES = 200;
+const matches = (text, query) => query.toLowerCase().split(/\s+/).filter(Boolean).every(term => text.toLowerCase().includes(term));
+
+// Hand-added voices: [{ id, nickname }], unique by ID. IDs cannot contain the label separator.
+export function parseCustomVoices(list) {
+    const seen = new Set();
+    return (Array.isArray(list) ? list : []).flatMap(item => {
+        const id = typeof item?.id === 'string' ? item.id.trim() : '';
+        if (!id || id.length > 256 || id.includes('·') || seen.has(id)) return [];
+        seen.add(id);
+        return [{ id, nickname: typeof item.nickname === 'string' ? item.nickname.trim().slice(0, 60) : '' }];
+    }).slice(0, MAX_CUSTOM_VOICES);
+}
+
 function clamp(value, min, max, fallback) {
     const number = typeof value === 'number' || (typeof value === 'string' && value.trim()) ? Number(value) : NaN;
     return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
@@ -14,8 +28,23 @@ function clamp(value, min, max, fallback) {
 export class MinimaxProvider extends StreamingProvider {
     constructor(host) {
         super(host, { service: 'MiniMax', voices: BUILT_IN_VOICES, defaultPreviewVoice: 'English_expressive_narrator', nativeSpeed: true });
+        // The account (or built-in) list; this.voices adds custom voices on top.
+        this.accountVoices = BUILT_IN_VOICES;
+        this.voices = this.composeVoices();
         this.voiceLoad = null;
         this.voiceGeneration = 0;
+        this.voiceMapObserver = null;
+    }
+
+    // Custom voices come first under Your voices; a nickname also relabels a listed voice.
+    composeVoices() {
+        const custom = this.settings.customVoices;
+        const ids = new Set(custom.map(item => item.id));
+        const listed = new Map(this.accountVoices.map(voice => [voice.voice_id, voice]));
+        return [
+            ...custom.map(({ id, nickname }) => voiceObject(id, { group: YOUR_VOICES, label: nickname || listed.get(id)?.label })),
+            ...this.accountVoices.filter(voice => !ids.has(voice.voice_id)),
+        ];
     }
 
     get settingsHtml() {
@@ -61,9 +90,19 @@ export class MinimaxProvider extends StreamingProvider {
             <input id="canary-custom-model" class="text_pole" type="text" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Overrides Model, e.g. a newer release" />
             ${bufferFieldHtml()}
             <div class="canary-actions"><button id="canary-reset-tuning" class="menu_button" type="button">Reset fine-tuning</button></div>`;
+        const custom = `<div class="canary-row">
+                <div><label for="canary-custom-voice-id">Voice ID</label>
+                    <input id="canary-custom-voice-id" class="text_pole" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="e.g. a cloned voice ID" /></div>
+                <div><label for="canary-custom-voice-nickname">Nickname (optional)</label>
+                    <input id="canary-custom-voice-nickname" class="text_pole" type="text" maxlength="60" autocomplete="off" placeholder="Shown in voice lists" /></div>
+            </div>
+            <div class="canary-actions"><button id="canary-add-voice" class="menu_button" type="button">Add voice</button></div>
+            <p class="canary-help">Add any voice ID from your MiniMax account, such as one cloned on the MiniMax website. Adding a listed voice’s ID gives it a nickname.</p>
+            <ul id="canary-custom-voice-list" class="canary-voice-list"></ul>`;
         return `<div class="canary-settings">
             ${sectionHtml('connection', 'Connection', connection, { open: !this.host.keys.value, summary: true })}
             ${sectionHtml('voice', 'Voice', voice, { open: true })}
+            ${sectionHtml('custom', 'Custom voices', custom, { summary: true })}
             ${sectionHtml('tuning', 'Fine-tuning', tuning)}
             ${sectionHtml('preview', 'Preview', previewFieldsHtml('Voices load from your MiniMax account once a key is saved, cloned voices first. SillyTavern’s Reload button refreshes them.'), { open: true })}
             ${STATUS_HTML}
@@ -82,6 +121,7 @@ export class MinimaxProvider extends StreamingProvider {
             volume: Math.round(clamp(settings.volume, 0.1, 10, 1) * 10) / 10,
             pitch: Math.round(clamp(settings.pitch, -12, 12, 0)),
             normalize: settings.normalize === true,
+            customVoices: parseCustomVoices(settings.customVoices),
         };
     }
 
@@ -135,12 +175,108 @@ export class MinimaxProvider extends StreamingProvider {
         on('canary-volume', 'input', () => { this.settings.volume = Number(get('canary-volume').value); showTuning(); save(); });
         on('canary-pitch', 'input', () => { this.settings.pitch = Number(get('canary-pitch').value); showTuning(); save(); });
         on('canary-normalize', 'change', () => { this.settings.normalize = get('canary-normalize').checked; save(); });
+        const addVoice = () => {
+            const id = get('canary-custom-voice-id').value.trim();
+            const nickname = get('canary-custom-voice-nickname').value.trim();
+            const error = !id ? 'Enter a voice ID to add.'
+                : id.includes('·') ? 'Voice IDs cannot contain “·”.'
+                : this.settings.customVoices.length >= MAX_CUSTOM_VOICES && !this.settings.customVoices.some(item => item.id === id) ? `Canary keeps up to ${MAX_CUSTOM_VOICES} custom voices.`
+                : '';
+            if (error) { this.status(error, 'error'); return; }
+            const existing = this.settings.customVoices.findIndex(item => item.id === id);
+            if (existing === -1) this.settings.customVoices.unshift({ id, nickname });
+            else this.settings.customVoices[existing] = { id, nickname };
+            this.settings.customVoices = parseCustomVoices(this.settings.customVoices);
+            get('canary-custom-voice-id').value = '';
+            get('canary-custom-voice-nickname').value = '';
+            this.previewVoice = id;
+            this.onCustomVoicesChanged();
+            this.status(existing === -1 ? 'Voice added.' : 'Voice updated.');
+        };
+        on('canary-add-voice', 'click', addVoice);
+        for (const id of ['canary-custom-voice-id', 'canary-custom-voice-nickname']) {
+            on(id, 'keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addVoice(); } });
+        }
+        on('canary-custom-voice-list', 'click', event => {
+            const button = event.target instanceof Element ? event.target.closest('button[data-voice-id]') : null;
+            if (!button) return;
+            this.settings.customVoices = this.settings.customVoices.filter(item => item.id !== button.dataset.voiceId);
+            this.onCustomVoicesChanged();
+            this.status('Voice removed.');
+        });
+        this.voices = this.composeVoices();
+        this.renderPreviewVoices();
+        this.renderCustomVoices();
+        this.installVoiceMapSearch();
         on('canary-reset-tuning', 'click', () => {
             Object.assign(this.settings, { volume: 1, pitch: 0, normalize: false, customModel: '', bufferMs: 120 });
             showTuning();
             showWarning();
             save();
         });
+    }
+
+    onCustomVoicesChanged() {
+        this.voices = this.composeVoices();
+        this.host.saveSettings();
+        this.renderPreviewVoices();
+        this.renderCustomVoices();
+        this.host.refreshVoiceMap();
+    }
+
+    renderCustomVoices() {
+        const list = document.getElementById('canary-custom-voice-list');
+        if (!list || this.disposed) return;
+        const listed = new Map(this.accountVoices.map(voice => [voice.voice_id, voice]));
+        list.replaceChildren(...this.settings.customVoices.map(({ id, nickname }) => {
+            const item = document.createElement('li');
+            const label = document.createElement('span');
+            label.textContent = this.voices.find(voice => voice.voice_id === id)?.name ?? id;
+            if (!listed.has(id)) label.title = 'Not in the loaded voice list; MiniMax will be asked for this ID as entered.';
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'menu_button';
+            remove.textContent = 'Remove';
+            remove.dataset.voiceId = id;
+            remove.setAttribute('aria-label', `Remove ${id}`);
+            item.append(label, remove);
+            return item;
+        }));
+        const summary = document.getElementById('canary-custom-summary');
+        if (summary) summary.textContent = this.settings.customVoices.length ? `${this.settings.customVoices.length} added` : 'None';
+    }
+
+    // A filter box above SillyTavern's voice map. ST rebuilds the map's dropdowns on
+    // chat changes, so reapply the filter whenever its entries change.
+    installVoiceMapSearch() {
+        const block = document.getElementById('tts_voicemap_block');
+        if (!block || document.getElementById('canary-voicemap-search')) return;
+        const row = document.createElement('div');
+        row.id = 'canary-voicemap-search-row';
+        row.className = 'canary-voicemap-search';
+        const input = document.createElement('input');
+        input.id = 'canary-voicemap-search';
+        input.type = 'search';
+        input.className = 'text_pole';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.placeholder = 'Search voices in the voice map';
+        input.setAttribute('aria-label', 'Search voices in the voice map');
+        row.append(input);
+        block.before(row);
+        input.addEventListener('input', () => this.filterVoiceMap(), { signal: this.listeners.signal });
+        this.voiceMapObserver = new MutationObserver(() => this.filterVoiceMap());
+        this.voiceMapObserver.observe(block, { childList: true, subtree: true });
+    }
+
+    // Markers and each dropdown's current choice always stay visible.
+    filterVoiceMap() {
+        const query = document.getElementById('canary-voicemap-search')?.value ?? '';
+        for (const option of document.querySelectorAll('#tts_voicemap_block select option')) {
+            const hide = Boolean(query.trim()) && !option.selected && !VOICE_MAP_MARKERS.includes(option.value) && !matches(option.textContent, query);
+            option.hidden = hide;
+            option.disabled = hide;
+        }
     }
 
     // The account's voices depend on both the key and its region.
@@ -155,8 +291,10 @@ export class MinimaxProvider extends StreamingProvider {
         const generation = ++this.voiceGeneration;
         const apply = voices => {
             if (generation !== this.voiceGeneration || this.disposed) return;
-            this.voices = voices;
+            this.accountVoices = voices;
+            this.voices = this.composeVoices();
             this.renderPreviewVoices();
+            this.renderCustomVoices();
         };
         this.voiceLoad = (async () => {
             if (!this.host.keys.value) { apply(BUILT_IN_VOICES); return null; }
@@ -179,19 +317,27 @@ export class MinimaxProvider extends StreamingProvider {
 
     async fetchTtsVoiceObjects() {
         await this.loadVoices();
-        // Keep mapped voices selectable when the current list lacks them, for
-        // example a cloned voice while the account list could not be loaded.
-        const known = new Set(this.voices.map(voice => voice.voice_id));
-        const mapped = this.settings.voiceMap && typeof this.settings.voiceMap === 'object' ? Object.values(this.settings.voiceMap) : [];
-        const extra = [...new Set(mapped)].filter(id => typeof id === 'string' && id && !known.has(id) && !VOICE_MAP_MARKERS.includes(id));
-        return [...this.voices, ...extra.map(id => ({ name: id, voice_id: id, group: YOUR_VOICES, preview_url: false }))].map(voice => ({ ...voice }));
+        const byName = new Map(this.voices.map(voice => [voice.name, voice]));
+        const byId = new Map(this.voices.map(voice => [voice.voice_id, voice]));
+        const map = this.settings.voiceMap && typeof this.settings.voiceMap === 'object' ? this.settings.voiceMap : {};
+        const extra = new Set();
+        for (const [character, value] of Object.entries(map)) {
+            if (typeof value !== 'string' || !value || VOICE_MAP_MARKERS.includes(value) || byName.has(value)) continue;
+            // Relabel entries saved as bare IDs (earlier versions) or under an older
+            // label. ST reads this same object while building the map, then saves it.
+            const voice = byId.get(voiceIdOf(value));
+            if (voice) map[character] = voice.name;
+            // Keep unlisted voices selectable, e.g. a clone while the account list failed to load.
+            else extra.add(value);
+        }
+        return [...this.voices, ...[...extra].map(name => ({ name, voice_id: voiceIdOf(name), group: YOUR_VOICES, preview_url: false }))].map(voice => ({ ...voice }));
     }
 
-    // Voice names are voice IDs, so an unlisted mapping can still be sent to MiniMax.
+    // Accepts current labels, older labels and bare IDs; an unlisted ID is sent as entered.
     async getVoice(name) {
         if (typeof name !== 'string' || !name.trim()) throw new Error('Select a MiniMax voice in the voice map.');
-        const voice = this.voices.find(item => item.name === name);
-        return voice ? { ...voice } : { name, voice_id: name, preview_url: false };
+        const voice = this.voices.find(item => item.name === name) ?? this.voices.find(item => item.voice_id === voiceIdOf(name));
+        return voice ? { ...voice } : { name, voice_id: voiceIdOf(name), preview_url: false };
     }
 
     async onRefreshClick() {
@@ -202,6 +348,12 @@ export class MinimaxProvider extends StreamingProvider {
 
     dispose() {
         document.body?.classList.remove('canary-own-speed');
+        this.voiceMapObserver?.disconnect();
+        document.getElementById('canary-voicemap-search-row')?.remove();
+        for (const option of document.querySelectorAll?.('#tts_voicemap_block select option') ?? []) {
+            option.hidden = false;
+            option.disabled = false;
+        }
         super.dispose();
     }
 

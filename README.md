@@ -41,7 +41,7 @@ The MiMo panel uses the same sections: Connection, Voice (delivery instructions)
 
 MiniMax (Canary) is an alternative to SillyTavern's built-in MiniMax provider when you want the current models or streaming. The built-in provider sends each passage through the SillyTavern server and plays it only after generation finishes. The two do not share a key (see [Keys and privacy](#keys-and-privacy)).
 
-Settings are grouped into collapsible sections. **Connection** folds to a one-line summary (key status and region) once a key is saved; **Fine-tuning** starts folded.
+Settings are grouped into collapsible sections: Connection, Voice, Custom voices, Fine-tuning and Preview. **Connection** folds to a one-line summary (key status and region) once a key is saved; **Custom voices** and **Fine-tuning** start folded.
 
 **Connection**
 
@@ -63,9 +63,14 @@ Settings are grouped into collapsible sections. **Connection** folds to a one-li
 
 Only changed values are sent; defaults leave MiniMax's own behavior untouched.
 
-**Preview and voices**
+**Voices**
 
-After you save a key, Canary loads your account's voices: cloned and designed voices under **Your voices**, then system voices grouped by language. Without a key, or if loading fails, a built-in list of English, Chinese, Cantonese and Japanese system voices is shown. Long lists get a search box that matches every word you type, such as `calm japanese`. Voices appear by voice ID. SillyTavern's **Reload** button reloads the list. Voices already assigned in the voice map stay selectable even if the list could not be loaded. The voice map's own dropdowns belong to SillyTavern and stay a plain list.
+After you save a key, Canary loads your account's voices: cloned and designed voices under **Your voices**, then system voices grouped by language. Without a key, or if loading fails, a built-in list of English, Chinese, Cantonese and Japanese system voices is shown. SillyTavern's **Reload** button reloads the list.
+
+- **Names:** Voices appear as a readable name plus the voice ID, such as `Expressive Narrator · English_expressive_narrator`, in Canary's list and in SillyTavern's voice map. Voices without a name (usually clones) appear by ID. Assignments saved by earlier versions as bare IDs are relabelled automatically and keep working.
+- **Search:** Canary's preview list (when long) and a box above SillyTavern's voice map both filter by every word you type, matching names, nicknames and IDs, such as `calm japanese`. The voice-map search never hides `[Default Voice]`, `disabled` or a dropdown's current choice. It hides options through the browser's dropdown; a browser that ignores hidden options shows them greyed out instead.
+- **Custom voices:** Add any voice ID from your MiniMax account, such as a voice cloned on the MiniMax website, with an optional nickname. Custom voices are listed first under **Your voices** and appear in the voice map. Adding the ID of a voice that is already listed gives it a nickname. Adding an existing custom ID again updates its nickname, and assignments follow the new name. Removing a custom voice that is still assigned keeps that assignment working by ID. Canary does not check that a hand-added ID exists; MiniMax reports an error when it is used if it does not.
+- Voices already assigned in the voice map stay selectable even if the list could not be loaded.
 
 Long passages are split at a client policy of 3,000 Unicode code points per request (MiniMax accepts under 10,000).
 
