@@ -34,6 +34,8 @@ export class MinimaxProvider extends StreamingProvider {
         this.voiceLoad = null;
         this.voiceGeneration = 0;
         this.voiceMapObserver = null;
+        // Each voice map dropdown's full option list, in SillyTavern's order.
+        this.voiceMapOptions = new WeakMap();
     }
 
     // Custom voices come first under Your voices; a nickname also relabels a listed voice.
@@ -269,14 +271,19 @@ export class MinimaxProvider extends StreamingProvider {
         this.voiceMapObserver.observe(block, { childList: true, subtree: true });
     }
 
-    // Markers and each dropdown's current choice always stay visible.
+    // Non-matching options are detached, not hidden: iOS pickers ignore hidden options.
+    // Markers and each dropdown's current choice always stay.
     filterVoiceMap() {
         const query = document.getElementById('canary-voicemap-search')?.value ?? '';
-        for (const option of document.querySelectorAll('#tts_voicemap_block select option')) {
-            const hide = Boolean(query.trim()) && !option.selected && !VOICE_MAP_MARKERS.includes(option.value) && !matches(option.textContent, query);
-            option.hidden = hide;
-            option.disabled = hide;
+        for (const select of document.querySelectorAll('#tts_voicemap_block select')) {
+            if (!this.voiceMapOptions.has(select)) this.voiceMapOptions.set(select, [...select.options]);
+            const value = select.value;
+            const keep = option => !query.trim() || option.value === value || VOICE_MAP_MARKERS.includes(option.value) || matches(option.textContent, query);
+            select.replaceChildren(...this.voiceMapOptions.get(select).filter(keep));
+            select.value = value;
         }
+        // Our own edits are not SillyTavern rebuilds.
+        this.voiceMapObserver?.takeRecords();
     }
 
     // The account's voices depend on both the key and its region.
@@ -349,11 +356,9 @@ export class MinimaxProvider extends StreamingProvider {
     dispose() {
         document.body?.classList.remove('canary-own-speed');
         this.voiceMapObserver?.disconnect();
+        const search = document.getElementById('canary-voicemap-search');
+        if (search) { search.value = ''; this.filterVoiceMap(); }
         document.getElementById('canary-voicemap-search-row')?.remove();
-        for (const option of document.querySelectorAll?.('#tts_voicemap_block select option') ?? []) {
-            option.hidden = false;
-            option.disabled = false;
-        }
         super.dispose();
     }
 

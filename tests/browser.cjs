@@ -423,13 +423,23 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(narration.closed, true);
         console.log('PASS MiniMax narration streams before completion and native Stop closes the stream');
 
-        const aliceOptions = () => page.locator('#tts_voicemap_char_Alice_voice option').evaluateAll(options => options.filter(o => !o.hidden).map(o => o.value));
+        // Options must leave the dropdown: iOS pickers ignore hidden options.
+        const aliceOptions = () => page.locator('#tts_voicemap_char_Alice_voice option').evaluateAll(options => options.map(o => o.value));
         assert.equal(await page.locator('#canary-preview-voice option[value="English_expressive_narrator"]').textContent(), 'Expressive Narrator · English_expressive_narrator');
-        assert.ok((await aliceOptions()).includes('Calm Woman · English_CalmWoman'), 'The voice map shows readable names');
+        const allOptions = await aliceOptions();
+        assert.ok(allOptions.includes('Calm Woman · English_CalmWoman'), 'The voice map shows readable names');
         await page.locator('#canary-voicemap-search').fill('calm');
         assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'qa-clone', 'Calm Woman · English_CalmWoman'], 'Search keeps markers and the current choice');
+        await page.evaluate(() => import('/scripts/extensions/tts/index.js').then(tts => tts.initVoiceMap()));
+        await page.waitForFunction(() => document.querySelectorAll('#tts_voicemap_char_Alice_voice option').length === 4);
+        assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'qa-clone', 'Calm Woman · English_CalmWoman'], 'Search survives SillyTavern rebuilding the voice map');
+        await page.selectOption('#tts_voicemap_char_Alice_voice', 'Calm Woman · English_CalmWoman');
+        await page.locator('#canary-voicemap-search').fill('calm woman');
+        assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'Calm Woman · English_CalmWoman'], 'A newly chosen voice becomes the kept choice');
         await page.locator('#canary-voicemap-search').fill('');
-        assert.ok((await aliceOptions()).includes('Expressive Narrator · English_expressive_narrator'));
+        assert.deepEqual(await aliceOptions(), allOptions, 'Clearing the search restores every option in order');
+        assert.equal(await page.locator('#tts_voicemap_char_Alice_voice').inputValue(), 'Calm Woman · English_CalmWoman');
+        await page.selectOption('#tts_voicemap_char_Alice_voice', 'qa-clone');
         console.log('PASS MiniMax readable voice names and voice-map search');
 
         await page.evaluate(() => window.mockMode = 'short');
