@@ -1,0 +1,8 @@
+.canary-settings { display: flex; flex-direction: column; gap: 0.65rem; }
+.canary-settings label { display: block; }
+.canary-settings .canary-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.canary-settings .canary-actions .menu_button { margin: 0; width: auto; }
+.canary-settings .canary-help { font-size: 0.9em; opacity: 0.8; margin: 0; }
+.canary-settings .canary-status { min-height: 1.5em; overflow-wrap: anywhere; }
+.canary-settings input, .canary-settings textarea, .canary-settings select { max-width: 100%; }
+.canary-settings .canary-remember { display: flex; align-items: center; gap: 0.5rem; }

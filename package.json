@@ -1,0 +1,12 @@
+{
+    "name": "sillytavern-canary",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "node --test tests/*.test.js",
+        "test:browser": "node tests/browser.cjs",
+        "check": "node --check index.js && node --check providers/mimo.js && node --check lib/mimo-api.js && node --check lib/pcm-player.js && node --check lib/sse.js && node --check lib/key-store.js"
+    },
+    "engines": { "node": ">=20" }
+}
