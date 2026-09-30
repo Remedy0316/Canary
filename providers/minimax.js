@@ -1,4 +1,5 @@
 import { BUILT_IN_VOICES, EMOTIONS, emotionWarning, fetchVoices, groupVoices, HOSTS, LANGUAGES, MODELS, streamSpeech, TEXT_LIMIT, voiceIdOf, voiceObject, YOUR_VOICES } from '../lib/minimax-api.js';
+import { makeSearchable, removeSearchable } from '../lib/searchable.js';
 import { splitText } from '../lib/text.js';
 import { bufferFieldHtml, keyFieldsHtml, previewFieldsHtml, sectionHtml, STATUS_HTML, StreamingProvider } from './streaming.js';
 
@@ -7,7 +8,6 @@ const VOICE_MAP_MARKERS = ['[Default Voice]', 'disabled'];
 const REGION_LABELS = Object.freeze({ global: 'Global', mainland: 'Mainland China' });
 const capitalize = text => text[0].toUpperCase() + text.slice(1);
 const MAX_CUSTOM_VOICES = 200;
-const matches = (text, query) => query.toLowerCase().split(/\s+/).filter(Boolean).every(term => text.toLowerCase().includes(term));
 
 // Hand-added voices: [{ id, nickname }], unique by ID. IDs cannot contain the label separator.
 export function parseCustomVoices(list) {
@@ -34,8 +34,6 @@ export class MinimaxProvider extends StreamingProvider {
         this.voiceLoad = null;
         this.voiceGeneration = 0;
         this.voiceMapObserver = null;
-        // Each voice map dropdown's full option list, in SillyTavern's order.
-        this.voiceMapOptions = new WeakMap();
     }
 
     // Custom voices come first under Your voices; a nickname also relabels a listed voice.
@@ -209,7 +207,9 @@ export class MinimaxProvider extends StreamingProvider {
         this.voices = this.composeVoices();
         this.renderPreviewVoices();
         this.renderCustomVoices();
-        this.installVoiceMapSearch();
+        makeSearchable(get('canary-preview-voice'), { placeholder: 'Search voices, e.g. calm english', nativeChange: true });
+        makeSearchable(get('canary-language'), { placeholder: 'Search languages', nativeChange: true });
+        this.enhanceVoiceMap();
         on('canary-reset-tuning', 'click', () => {
             Object.assign(this.settings, { volume: 1, pitch: 0, normalize: false, customModel: '', bufferMs: 120 });
             showTuning();
@@ -248,42 +248,15 @@ export class MinimaxProvider extends StreamingProvider {
         if (summary) summary.textContent = this.settings.customVoices.length ? `${this.settings.customVoices.length} added` : 'None';
     }
 
-    // A filter box above SillyTavern's voice map. ST rebuilds the map's dropdowns on
-    // chat changes, so reapply the filter whenever its entries change.
-    installVoiceMapSearch() {
+    // Make SillyTavern's voice map dropdowns searchable. ST rebuilds them on chat
+    // changes and voice refreshes, so enhance each new dropdown as it appears.
+    enhanceVoiceMap() {
         const block = document.getElementById('tts_voicemap_block');
-        if (!block || document.getElementById('canary-voicemap-search')) return;
-        const row = document.createElement('div');
-        row.id = 'canary-voicemap-search-row';
-        row.className = 'canary-voicemap-search';
-        const input = document.createElement('input');
-        input.id = 'canary-voicemap-search';
-        input.type = 'search';
-        input.className = 'text_pole';
-        input.autocomplete = 'off';
-        input.spellcheck = false;
-        input.placeholder = 'Search voices in the voice map';
-        input.setAttribute('aria-label', 'Search voices in the voice map');
-        row.append(input);
-        block.before(row);
-        input.addEventListener('input', () => this.filterVoiceMap(), { signal: this.listeners.signal });
-        this.voiceMapObserver = new MutationObserver(() => this.filterVoiceMap());
+        if (!block || this.voiceMapObserver) return;
+        const enhance = () => block.querySelectorAll('select').forEach(select => makeSearchable(select, { placeholder: 'Search voices' }));
+        this.voiceMapObserver = new MutationObserver(enhance);
         this.voiceMapObserver.observe(block, { childList: true, subtree: true });
-    }
-
-    // Non-matching options are detached, not hidden: iOS pickers ignore hidden options.
-    // Markers and each dropdown's current choice always stay.
-    filterVoiceMap() {
-        const query = document.getElementById('canary-voicemap-search')?.value ?? '';
-        for (const select of document.querySelectorAll('#tts_voicemap_block select')) {
-            if (!this.voiceMapOptions.has(select)) this.voiceMapOptions.set(select, [...select.options]);
-            const value = select.value;
-            const keep = option => !query.trim() || option.value === value || VOICE_MAP_MARKERS.includes(option.value) || matches(option.textContent, query);
-            select.replaceChildren(...this.voiceMapOptions.get(select).filter(keep));
-            select.value = value;
-        }
-        // Our own edits are not SillyTavern rebuilds.
-        this.voiceMapObserver?.takeRecords();
+        enhance();
     }
 
     // The account's voices depend on both the key and its region.
@@ -356,9 +329,7 @@ export class MinimaxProvider extends StreamingProvider {
     dispose() {
         document.body?.classList.remove('canary-own-speed');
         this.voiceMapObserver?.disconnect();
-        const search = document.getElementById('canary-voicemap-search');
-        if (search) { search.value = ''; this.filterVoiceMap(); }
-        document.getElementById('canary-voicemap-search-row')?.remove();
+        for (const select of document.querySelectorAll?.('#tts_voicemap_block select, #canary-preview-voice, #canary-language') ?? []) removeSearchable(select);
         super.dispose();
     }
 

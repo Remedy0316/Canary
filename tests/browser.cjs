@@ -45,6 +45,7 @@ stubs.set('/scripts/slash-commands/SlashCommand.js', 'export const SlashCommand=
 stubs.set('/scripts/slash-commands/SlashCommandArgument.js', 'export const ARGUMENT_TYPE={STRING:"string"}; export class SlashCommandArgument{} export class SlashCommandNamedArgument {static fromProps(obj){return obj}}');
 
 const html = `<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/upstream/select2.css"><link rel="stylesheet" href="/upstream/select2-overrides.css">
 <link rel="stylesheet" href="/canary/style.css"><style>
 body{background:#222;color:#eee;font:16px system-ui;margin:16px;max-width:720px}button,select,input,textarea{font:inherit;box-sizing:border-box}
 .text_pole{width:100%;padding:8px;background:#333;color:#eee;border:1px solid #777;border-radius:5px}.menu_button{padding:7px;cursor:pointer}
@@ -52,7 +53,7 @@ body{background:#222;color:#eee;font:16px system-ui;margin:16px;max-width:720px}
 .tts_voicemap_block_char select{max-width:55%}#tts_media_control{display:inline-block;padding:10px;border:1px solid #888;cursor:pointer}#tts_media_control:after{content:'Native play / stop'}
 </style><h1>Canary integration QA</h1><div id="tts_container"></div><div id="tts_wand_container"></div>
 <div class="mes" mesid="0"><button class="mes_narrate">Read Alice</button></div>
-<script src="/jquery.js"></script><script>
+<script src="/jquery.js"></script><script src="/upstream/select2.js"></script><script src="/upstream/select2-search-placeholder.js"></script><script>
 // Mirrors SillyTavern's global inline-drawer toggle (script.js), without the slide animation.
 $(document).on('click','.inline-drawer-toggle',function(e){if($(e.target).hasClass('text_pole'))return;const d=$(this).closest('.inline-drawer');d.find('>.inline-drawer-header .inline-drawer-icon').toggleClass('down up').toggleClass('fa-circle-chevron-down fa-circle-chevron-up');d.find('>.inline-drawer-content').toggle();});
 window.errors=[];window.notices=[];window.toastr={error:m=>window.errors.push(String(m)),success:m=>window.notices.push(String(m)),info:()=>{}};
@@ -154,6 +155,10 @@ const server = http.createServer((req, res) => {
     if (url.pathname === '/') { content = html; type = 'text/html'; }
     else if (url.pathname === '/upstream-settings') { content = fs.readFileSync(path.join(upstream, 'settings.html')); type = 'text/html'; }
     else if (url.pathname === '/jquery.js') content = fs.readFileSync(path.join(upstream, 'jquery.js'));
+    else if (/^\/upstream\/select2[\w.-]*\.(js|css)$/.test(url.pathname)) {
+        content = fs.readFileSync(path.join(upstream, path.basename(url.pathname)));
+        if (url.pathname.endsWith('.css')) type = 'text/css';
+    }
     else if (url.pathname === '/scripts/extensions/tts/index.js') content = tts;
     else if (stubs.has(url.pathname)) content = stubs.get(url.pathname);
     else if (url.pathname.startsWith('/canary/')) {
@@ -180,6 +185,27 @@ async function openSection(key) {
     await sectionContent(key).waitFor({ state: 'visible' });
 }
 const optgroups = () => page.locator('#canary-preview-voice optgroup').evaluateAll(groups => groups.map(group => group.label));
+// Drive a searchable (select2) dropdown as a user does: open it, type, read the results.
+const searchDropdown = async (id, text) => {
+    await page.click(`#${id} + .select2-container .select2-selection`);
+    // Type key by key: select2 skips input events that no keydown preceded.
+    await page.locator('.select2-container--open .select2-search__field').pressSequentially(text);
+    // Wait until the results reflect the search: every option matches (with its group label) or none do.
+    await page.waitForFunction(terms => {
+        const open = document.querySelector('.select2-container--open .select2-results');
+        if (!open) return false;
+        if (open.querySelector('.select2-results__message')) return true;
+        const options = [...open.querySelectorAll('.select2-results__option--selectable')];
+        const group = option => option.closest('.select2-results__option--group')?.querySelector('.select2-results__group')?.textContent ?? '';
+        return options.length > 0 && options.every(option => terms.every(term => `${option.textContent} ${group(option)}`.toLowerCase().includes(term)));
+    }, text.toLowerCase().split(/\s+/).filter(Boolean));
+    return page.locator('.select2-container--open .select2-results__option--selectable').allTextContents();
+};
+const choose = async (id, text) => {
+    const results = await searchDropdown(id, text);
+    assert.equal(results.length, 1, `"${text}" should find one option in #${id}, found: ${results.join(', ')}`);
+    await page.keyboard.press('Enter');
+};
 
 let browser;
 let context;
@@ -382,13 +408,17 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await sectionContent('tuning').isVisible(), false, 'Fine-tuning starts folded');
         assert.equal(await page.textContent('#canary-connection-summary'), 'No key saved · Global');
         assert.deepEqual((await optgroups()).slice(0, 4), ['English', 'Chinese (Mandarin)', 'Cantonese', 'Japanese']);
-        await page.locator('#canary-voice-search').fill('calm japanese');
-        assert.deepEqual(await page.locator('#canary-preview-voice option').evaluateAll(o => o.map(x => x.value)), ['Japanese_CalmLady']);
-        await page.locator('#canary-voice-search').fill('no such voice');
-        assert.equal(await page.inputValue('#canary-preview-voice'), '');
-        await page.locator('#canary-voice-search').fill('');
-        assert.equal(await page.inputValue('#canary-preview-voice'), 'English_expressive_narrator', 'Clearing the search restores the chosen voice');
-        console.log('PASS MiniMax sections, connection summary, grouped built-in voices and voice search');
+        assert.equal(await page.locator('#canary-voice-search, #canary-voicemap-search').count(), 0, 'Dropdowns search in place; no separate search boxes');
+        await page.evaluate(() => { window.previewChanges = 0; document.getElementById('canary-preview-voice').addEventListener('change', () => window.previewChanges++); });
+        assert.deepEqual(await searchDropdown('canary-preview-voice', 'calm japanese'), ['Calm Lady · Japanese_CalmLady'], 'Every term must match the name or its language group');
+        await page.keyboard.press('Enter');
+        assert.equal(await page.inputValue('#canary-preview-voice'), 'Japanese_CalmLady');
+        assert.equal(await page.evaluate(() => window.previewChanges), 1, 'Canary hears a searched choice exactly once');
+        assert.deepEqual(await searchDropdown('canary-preview-voice', 'no such voice'), []);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.inputValue('#canary-preview-voice'), 'Japanese_CalmLady', 'A search without a choice keeps the voice');
+        await choose('canary-preview-voice', 'english_expressive_narrator');
+        console.log('PASS MiniMax sections, connection summary, grouped built-in voices and searchable preview dropdown');
         await page.locator('#canary-key').fill('qa-minimax-key');
         await page.check('#canary-remember');
         await page.click('#canary-save-key');
@@ -396,14 +426,13 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.inputValue('#canary-preview-voice'), 'English_expressive_narrator');
         assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · remembered · Global');
         assert.deepEqual(await optgroups(), ['Your voices', 'English']);
-        assert.equal(await page.locator('#canary-voice-search-row').isVisible(), false, 'Short lists need no search box');
         const voiceRequest = minimaxRequests.at(-1);
         assert.deepEqual([voiceRequest.endpoint, voiceRequest.region, voiceRequest.auth], ['get_voice', 'global', 'Bearer qa-minimax-key']);
         assert.equal(await page.evaluate(() => window.settings.canary.minimaxKey), 'qa-minimax-key');
         assert.equal(await page.evaluate(() => window.settings.canary.mimoKey), undefined);
         assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings.tts))).includes('qa-minimax-key'));
         await page.waitForFunction(() => [...document.querySelectorAll('#tts_voicemap_char_Alice_voice option')].some(o => o.value === 'qa-clone'));
-        await page.selectOption('#tts_voicemap_char_Alice_voice', 'qa-clone');
+        await choose('tts_voicemap_char_Alice_voice', 'qa-clone');
         console.log('PASS MiniMax key is separate and account voices, including cloned voices, reach the voice map');
 
         await page.click('.mes_narrate');
@@ -423,24 +452,23 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(narration.closed, true);
         console.log('PASS MiniMax narration streams before completion and native Stop closes the stream');
 
-        // Options must leave the dropdown: iOS pickers ignore hidden options.
         const aliceOptions = () => page.locator('#tts_voicemap_char_Alice_voice option').evaluateAll(options => options.map(o => o.value));
         assert.equal(await page.locator('#canary-preview-voice option[value="English_expressive_narrator"]').textContent(), 'Expressive Narrator · English_expressive_narrator');
         const allOptions = await aliceOptions();
         assert.ok(allOptions.includes('Calm Woman · English_CalmWoman'), 'The voice map shows readable names');
-        await page.locator('#canary-voicemap-search').fill('calm');
-        assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'qa-clone', 'Calm Woman · English_CalmWoman'], 'Search keeps markers and the current choice');
+        assert.deepEqual(await searchDropdown('tts_voicemap_char_Alice_voice', 'calm'), ['Calm Woman · English_CalmWoman'], 'Voice map dropdowns search in place');
+        await page.keyboard.press('Enter');
+        assert.equal(await page.evaluate(() => window.settings.tts['MiniMax (Canary)'].voiceMap.Alice), 'Calm Woman · English_CalmWoman', 'SillyTavern saves a searched choice');
+        assert.deepEqual(await aliceOptions(), allOptions, 'Searching never removes options');
         await page.evaluate(() => import('/scripts/extensions/tts/index.js').then(tts => tts.initVoiceMap()));
-        await page.waitForFunction(() => document.querySelectorAll('#tts_voicemap_char_Alice_voice option').length === 4);
-        assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'qa-clone', 'Calm Woman · English_CalmWoman'], 'Search survives SillyTavern rebuilding the voice map');
-        await page.selectOption('#tts_voicemap_char_Alice_voice', 'Calm Woman · English_CalmWoman');
-        await page.locator('#canary-voicemap-search').fill('calm woman');
-        assert.deepEqual(await aliceOptions(), ['[Default Voice]', 'disabled', 'Calm Woman · English_CalmWoman'], 'A newly chosen voice becomes the kept choice');
-        await page.locator('#canary-voicemap-search').fill('');
-        assert.deepEqual(await aliceOptions(), allOptions, 'Clearing the search restores every option in order');
-        assert.equal(await page.locator('#tts_voicemap_char_Alice_voice').inputValue(), 'Calm Woman · English_CalmWoman');
-        await page.selectOption('#tts_voicemap_char_Alice_voice', 'qa-clone');
-        console.log('PASS MiniMax readable voice names and voice-map search');
+        await page.waitForFunction(() => document.querySelector('#tts_voicemap_char_Alice_voice + .select2-container'));
+        assert.equal(await page.inputValue('#tts_voicemap_char_Alice_voice'), 'Calm Woman · English_CalmWoman', 'Rebuilt dropdowns stay searchable and keep the choice');
+        await choose('tts_voicemap_char_Alice_voice', 'qa-clone');
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await page.locator('.canary-settings').evaluate(el => el.scrollWidth > el.clientWidth + 1), false, 'Searchable dropdowns fit a phone width');
+        await page.screenshot({ path: path.join(root, '.qa', 'canary-minimax-mobile.png'), fullPage: true });
+        await page.setViewportSize({ width: 1100, height: 1000 });
+        console.log('PASS MiniMax readable voice names and searchable voice-map dropdowns');
 
         await page.evaluate(() => window.mockMode = 'short');
         await openSection('custom');
@@ -453,7 +481,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.inputValue('#canary-preview-voice'), 'qa-hand-added');
         assert.deepEqual(await page.locator('#canary-preview-voice optgroup[label="Your voices"] option').evaluateAll(o => o.map(x => x.value)), ['qa-hand-added', 'qa-clone']);
         await page.waitForFunction(() => [...document.querySelectorAll('#tts_voicemap_char_Alice_voice option')].some(o => o.value === 'Hero · qa-hand-added'));
-        await page.selectOption('#tts_voicemap_char_Alice_voice', 'Hero · qa-hand-added');
+        await choose('tts_voicemap_char_Alice_voice', 'hero qa-hand-added');
         await page.click('.mes_narrate');
         await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
         assert.equal(minimaxRequests.at(-1).body.voice_setting.voice_id, 'qa-hand-added', 'Custom voices send their ID');
@@ -469,7 +497,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.click('.mes_narrate');
         await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
         assert.equal(minimaxRequests.at(-1).body.voice_setting.voice_id, 'qa-hand-added', 'A removed custom voice still assigned in the map keeps working');
-        await page.selectOption('#canary-preview-voice', 'English_expressive_narrator');
+        await choose('canary-preview-voice', 'english_expressive_narrator');
         await page.evaluate(() => window.mockMode = 'normal');
         console.log('PASS MiniMax custom voices: add with nickname, use in the voice map, rename, remove');
 
@@ -510,7 +538,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.locator('#canary-volume').fill('2.5');
         await page.locator('#canary-pitch').fill('-3');
         await page.check('#canary-normalize');
-        await page.selectOption('#canary-language', 'Japanese');
+        await choose('canary-language', 'japanese');
         assert.equal(await page.textContent('#canary-volume-value'), '2.5');
         assert.equal(await page.textContent('#canary-pitch-value'), '-3');
         await page.click('#canary-preview');
@@ -543,7 +571,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.inputValue('#canary-key'), '');
         assert.equal(await page.locator('#canary-preview-voice option').count(), 8);
         assert.equal(await page.locator('#playback_rate_block').isVisible(), true, 'Other providers keep SillyTavern’s speed slider');
-        assert.equal(await page.locator('#canary-voicemap-search').count(), 0, 'The voice-map search box leaves with MiniMax');
+        assert.equal(await page.locator('#tts_voicemap_block .select2-container, #tts_voicemap_block .select2-hidden-accessible').count(), 0, 'Voice map dropdowns return to plain selects without MiniMax');
         await page.selectOption('#tts_provider', 'MiniMax (Canary)');
         assert.equal(await page.inputValue('#canary-key'), 'qa-minimax-key');
         assert.equal(await page.inputValue('#canary-region'), 'mainland');

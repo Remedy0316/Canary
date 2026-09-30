@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BUILT_IN_VOICES, buildRequest, emotionWarning, fetchVoices, groupVoices, streamSpeech, voiceIdOf } from '../lib/minimax-api.js';
 import { KeyStore } from '../lib/key-store.js';
+import { matchTerms } from '../lib/searchable.js';
 import { MinimaxProvider, parseCustomVoices } from '../providers/minimax.js';
 
 const encode = text => new TextEncoder().encode(text);
@@ -219,4 +220,16 @@ test('voice map entries saved as IDs or older labels are relabelled and still re
     assert.equal((await provider.getVoice('English_CalmWoman')).voice_id, 'English_CalmWoman');
     assert.equal((await provider.getVoice('Old Nick · English_CalmWoman')).voice_id, 'English_CalmWoman');
     assert.equal((await provider.getVoice('Gone · vanished-id')).voice_id, 'vanished-id');
+});
+
+test('dropdown search matches every term against an option and its group label', () => {
+    const term = text => ({ term: text });
+    const option = { id: 'Japanese_CalmLady', text: 'Calm Lady · Japanese_CalmLady' };
+    assert.equal(matchTerms(term(''), option), option);
+    assert.equal(matchTerms(term('CALM lady'), option), option);
+    assert.equal(matchTerms(term('calm english'), option), null);
+    const group = { text: 'Japanese', children: [option, { id: 'Japanese_KindLady', text: 'Kind Lady · Japanese_KindLady' }] };
+    assert.deepEqual(matchTerms(term('calm japanese'), group).children, [option], 'Group labels count as matching text');
+    assert.equal(group.children.length, 2, 'The original group is not modified');
+    assert.equal(matchTerms(term('whisper'), group), null);
 });

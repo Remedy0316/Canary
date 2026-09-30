@@ -8,6 +8,10 @@ const path = require('node:path');
         ['public/scripts/extensions/tts/index.js', 'tts.js'],
         ['public/scripts/extensions/tts/settings.html', 'settings.html'],
         ['public/lib/jquery-3.5.1.min.js', 'jquery.js'],
+        ['public/lib/select2.min.js', 'select2.js'],
+        ['public/lib/select2-search-placeholder.js', 'select2-search-placeholder.js'],
+        ['public/css/select2.min.css', 'select2.css'],
+        ['public/css/select2-overrides.css', 'select2-overrides.css'],
     ]) {
         const response = await fetch(`https://raw.githubusercontent.com/SillyTavern/SillyTavern/1.19.0/${source}`, { signal: AbortSignal.timeout(20000) });
         if (!response.ok) throw new Error(`Fixture download failed: HTTP ${response.status}`);

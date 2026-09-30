@@ -1,4 +1,5 @@
 import { PcmPlayer } from '../lib/pcm-player.js';
+import { refreshSearchable } from '../lib/searchable.js';
 
 const PREVIEW_TEXT = Object.freeze({
     en: 'Hello. This is Canary, ready to bring your next story to life.',
@@ -43,10 +44,7 @@ export function bufferFieldHtml() {
 }
 
 export function previewFieldsHtml(voiceHelp) {
-    return `<div id="canary-voice-search-row" hidden>
-                <input id="canary-voice-search" class="text_pole" type="search" autocomplete="off" spellcheck="false" placeholder="Search voices, e.g. calm english" aria-label="Search voices" />
-            </div>
-            <div class="canary-row">
+    return `<div class="canary-row">
                 <div><label for="canary-preview-voice">Preview voice</label><select id="canary-preview-voice" class="text_pole"></select></div>
                 <div><label for="canary-preview-language">Sample language / 试听语言</label>
                     <select id="canary-preview-language" class="text_pole">
@@ -64,8 +62,6 @@ export function previewFieldsHtml(voiceHelp) {
 }
 
 export const STATUS_HTML = '<p id="canary-status" class="canary-status" role="status" aria-live="polite"></p>';
-// The search box appears only for lists longer than this.
-const SEARCH_THRESHOLD = 12;
 
 // Playback lifecycle shared by streaming providers. Subclasses supply settingsHtml,
 // split(text) and stream({ text, voice, signal, speed }) yielding 24 kHz PCM bytes,
@@ -119,38 +115,25 @@ export class StreamingProvider {
         el.textContent = [...key, ...this.summaryParts()].join(' · ');
     }
 
-    // Filter by every search term; keep the chosen voice while it still matches.
+    // Keep the chosen voice while it is still listed.
     renderPreviewVoices() {
         const select = document.getElementById('canary-preview-voice');
         if (!select || this.disposed) return;
-        const row = document.getElementById('canary-voice-search-row');
-        if (row) row.hidden = this.voices.length <= SEARCH_THRESHOLD;
-        const query = row && !row.hidden ? document.getElementById('canary-voice-search')?.value ?? '' : '';
-        const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-        const matches = this.voices.filter(voice => terms.every(term => `${voice.name} ${voice.group ?? ''}`.toLowerCase().includes(term)));
         const option = voice => {
             const el = document.createElement('option');
             el.value = voice.voice_id;
             el.textContent = voice.name;
             return el;
         };
-        if (!matches.length) {
-            const empty = document.createElement('option');
-            empty.value = '';
-            empty.textContent = 'No voices match';
-            empty.disabled = true;
-            select.replaceChildren(empty);
-            select.value = '';
-            return;
-        }
-        select.replaceChildren(...this.groupVoices(matches).flatMap(({ label, voices }) => {
+        select.replaceChildren(...this.groupVoices(this.voices).flatMap(({ label, voices }) => {
             if (label === null) return voices.map(option);
             const group = document.createElement('optgroup');
             group.label = label;
             group.append(...voices.map(option));
             return [group];
         }));
-        select.value = matches.some(voice => voice.voice_id === this.previewVoice) ? this.previewVoice : matches[0].voice_id;
+        select.value = this.voices.some(voice => voice.voice_id === this.previewVoice) ? this.previewVoice : this.voices[0]?.voice_id ?? '';
+        refreshSearchable(select);
     }
 
     async loadSettings(settings = {}) {
@@ -163,7 +146,6 @@ export class StreamingProvider {
         get('canary-preview-language').value = this.settings.previewLanguage;
         this.renderPreviewVoices();
         this.updateConnectionSummary();
-        on('canary-voice-search', 'input', () => this.renderPreviewVoices());
         on('canary-preview-voice', 'change', () => { this.previewVoice = get('canary-preview-voice').value; });
         on('canary-save-key', 'click', () => {
             this.stopFromUi();
