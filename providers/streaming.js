@@ -8,45 +8,68 @@ const PREVIEW_TEXT = Object.freeze({
 
 // Settings markup shared by every provider. Element IDs can be shared because
 // SillyTavern shows one provider's settings at a time.
+
+// A collapsible section in SillyTavern's own inline-drawer markup; ST's global
+// click handler opens and closes it.
+export function sectionHtml(key, title, body, { open = false, summary = false } = {}) {
+    const icon = open ? 'fa-circle-chevron-up up' : 'fa-circle-chevron-down down';
+    return `<div class="inline-drawer canary-section" data-section="${key}">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>${title}</b>${summary ? `<span id="canary-${key}-summary" class="canary-summary"></span>` : ''}
+                <div class="inline-drawer-icon fa-solid ${icon}"></div>
+            </div>
+            <div class="inline-drawer-content"${open ? ' style="display: block;"' : ''}><div class="canary-fields">${body}</div></div>
+        </div>`;
+}
+
 export function keyFieldsHtml(service) {
     return `<label for="canary-key">${service} API key</label>
             <input id="canary-key" class="text_pole" type="password" autocomplete="off" spellcheck="false" placeholder="Enter your ${service} API key" />
             <label class="canary-remember"><input id="canary-remember" type="checkbox" /> Remember for this SillyTavern account</label>
-            <p class="canary-help">Otherwise the key lasts until this page closes or reloads. Remembered keys are saved unencrypted in this account’s SillyTavern settings on the server and work on any device you sign in from.</p>
+            <p class="canary-help">Otherwise the key lasts until this page closes or reloads. Remembered keys are saved unencrypted in this account’s SillyTavern settings.</p>
             <div class="canary-actions">
                 <button id="canary-save-key" class="menu_button" type="button">Save key</button>
                 <button id="canary-forget-key" class="menu_button" type="button">Forget key</button>
             </div>`;
 }
 
-export function playbackFieldsHtml(voiceHelp) {
+export function bufferFieldHtml() {
     return `<label for="canary-buffer">Streaming buffer</label>
             <select id="canary-buffer" class="text_pole">
                 <option value="80">80 ms · Faster start</option>
                 <option value="120">120 ms · Balanced</option>
                 <option value="250">250 ms · More buffering</option>
-            </select>
-            <label for="canary-preview-voice">Preview voice</label>
-            <select id="canary-preview-voice" class="text_pole"></select>
+            </select>`;
+}
+
+export function previewFieldsHtml(voiceHelp) {
+    return `<div id="canary-voice-search-row" hidden>
+                <input id="canary-voice-search" class="text_pole" type="search" autocomplete="off" spellcheck="false" placeholder="Search voices, e.g. calm english" aria-label="Search voices" />
+            </div>
+            <div class="canary-row">
+                <div><label for="canary-preview-voice">Preview voice</label><select id="canary-preview-voice" class="text_pole"></select></div>
+                <div><label for="canary-preview-language">Sample language / 试听语言</label>
+                    <select id="canary-preview-language" class="text_pole">
+                        <option value="bilingual">English + 中文</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                    </select></div>
+            </div>
             <p class="canary-help">${voiceHelp}</p>
-            <label for="canary-preview-language">Preview language / 试听语言</label>
-            <select id="canary-preview-language" class="text_pole">
-                <option value="bilingual">English + 中文</option>
-                <option value="en">English</option>
-                <option value="zh">中文</option>
-            </select>
             <div class="canary-actions">
                 <button id="canary-preview" class="menu_button" type="button">Preview</button>
                 <button id="canary-unlock" class="menu_button" type="button">Enable audio</button>
                 <button id="canary-stop" class="menu_button" type="button">Stop</button>
-            </div>
-            <p class="canary-help">Assign character voices using SillyTavern’s voice map. Enable audio once if your browser blocks automatic playback.</p>
-            <p id="canary-status" class="canary-status" role="status" aria-live="polite"></p>`;
+            </div>`;
 }
+
+export const STATUS_HTML = '<p id="canary-status" class="canary-status" role="status" aria-live="polite"></p>';
+// The search box appears only for lists longer than this.
+const SEARCH_THRESHOLD = 12;
 
 // Playback lifecycle shared by streaming providers. Subclasses supply settingsHtml,
 // split(text) and stream({ text, voice, signal, speed }) yielding 24 kHz PCM bytes,
-// and may extend parseSettings, bindSettings and onKeyChanged.
+// and may extend parseSettings, bindSettings, onKeyChanged, summaryParts and groupVoices.
 export class StreamingProvider {
     constructor(host, { service, voices, defaultPreviewVoice, nativeSpeed = false }) {
         this.host = host;
@@ -55,6 +78,7 @@ export class StreamingProvider {
         this.defaultPreviewVoice = defaultPreviewVoice;
         // Providers with a native speed parameter keep pitch; others resample in playback.
         this.nativeSpeed = nativeSpeed;
+        this.previewVoice = defaultPreviewVoice;
         this.settings = this.parseSettings({});
         this.separator = ' ';
         this.run = null;
@@ -81,18 +105,50 @@ export class StreamingProvider {
 
     bindSettings() { /* Provider-specific controls. */ }
     onKeyChanged() { /* Provider-specific reaction to a saved or removed key. */ }
+    summaryParts() { return []; }
+    // Preview list headings; a null label lists voices without a heading.
+    groupVoices(voices) { return [{ label: null, voices }]; }
 
+    updateConnectionSummary() {
+        const el = document.getElementById('canary-connection-summary');
+        if (!el || this.disposed) return;
+        const { value, remember } = this.host.keys;
+        const key = value ? ['✓ Key saved', remember ? 'remembered' : 'this session'] : ['No key saved'];
+        el.textContent = [...key, ...this.summaryParts()].join(' · ');
+    }
+
+    // Filter by every search term; keep the chosen voice while it still matches.
     renderPreviewVoices() {
         const select = document.getElementById('canary-preview-voice');
         if (!select || this.disposed) return;
-        const current = select.value || this.defaultPreviewVoice;
-        select.replaceChildren(...this.voices.map(voice => {
-            const option = document.createElement('option');
-            option.value = voice.voice_id;
-            option.textContent = voice.name;
-            return option;
+        const row = document.getElementById('canary-voice-search-row');
+        if (row) row.hidden = this.voices.length <= SEARCH_THRESHOLD;
+        const query = row && !row.hidden ? document.getElementById('canary-voice-search')?.value ?? '' : '';
+        const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+        const matches = this.voices.filter(voice => terms.every(term => `${voice.name} ${voice.group ?? ''}`.toLowerCase().includes(term)));
+        const option = voice => {
+            const el = document.createElement('option');
+            el.value = voice.voice_id;
+            el.textContent = voice.name;
+            return el;
+        };
+        if (!matches.length) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = 'No voices match';
+            empty.disabled = true;
+            select.replaceChildren(empty);
+            select.value = '';
+            return;
+        }
+        select.replaceChildren(...this.groupVoices(matches).flatMap(({ label, voices }) => {
+            if (label === null) return voices.map(option);
+            const group = document.createElement('optgroup');
+            group.label = label;
+            group.append(...voices.map(option));
+            return [group];
         }));
-        select.value = this.voices.some(voice => voice.voice_id === current) ? current : this.voices[0]?.voice_id ?? '';
+        select.value = matches.some(voice => voice.voice_id === this.previewVoice) ? this.previewVoice : matches[0].voice_id;
     }
 
     async loadSettings(settings = {}) {
@@ -104,10 +160,14 @@ export class StreamingProvider {
         get('canary-buffer').value = String(this.settings.bufferMs);
         get('canary-preview-language').value = this.settings.previewLanguage;
         this.renderPreviewVoices();
+        this.updateConnectionSummary();
+        on('canary-voice-search', 'input', () => this.renderPreviewVoices());
+        on('canary-preview-voice', 'change', () => { this.previewVoice = get('canary-preview-voice').value; });
         on('canary-save-key', 'click', () => {
             this.stopFromUi();
             this.host.keys.set(get('canary-key').value, get('canary-remember').checked);
             get('canary-remember').checked = this.host.keys.remember;
+            this.updateConnectionSummary();
             if (!this.host.keys.value) {
                 this.status(`Enter a ${this.service} API key.`);
                 this.host.notify(`Enter a ${this.service} API key before saving.`);
@@ -123,6 +183,7 @@ export class StreamingProvider {
             get('canary-key').value = '';
             get('canary-remember').checked = false;
             this.host.keys.clear();
+            this.updateConnectionSummary();
             this.status('Key removed.');
             this.host.notifySuccess('Key removed.');
             this.onKeyChanged();
@@ -293,7 +354,7 @@ export class StreamingProvider {
     async onRefreshClick() { this.stopFromUi(); }
     async previewTtsVoice(voiceId) {
         if (this.run) { this.status('Stop the current playback before previewing a voice.'); return; }
-        if (!(await this.fetchTtsVoiceObjects()).some(item => item.voice_id === voiceId)) return;
+        if (!(await this.fetchTtsVoiceObjects()).some(item => item.voice_id === voiceId)) { this.status('Select a voice to preview.'); return; }
         const text = PREVIEW_TEXT[this.settings.previewLanguage] || PREVIEW_TEXT.bilingual;
         try { await this.speak(text, voiceId, true); }
         catch (error) { this.host.notify(error.message || 'Voice preview failed.'); }

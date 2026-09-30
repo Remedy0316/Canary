@@ -31,6 +31,8 @@ Railway serves the extension files. Speech requests travel from your browser dir
 
 ### Xiaomi MiMo
 
+The MiMo panel uses the same sections: Connection, Voice (delivery instructions), Fine-tuning (streaming buffer) and Preview.
+
 - **Voices:** 冰糖, 茉莉, 苏打, 白桦, Mia, Chloe, Milo, Dean. All eight are available for English, Chinese, and mixed-language text. Canary preserves your selected voice across languages and sends the original text to MiMo without translation or a forced language parameter. Pronunciation and accent depend on MiMo.
 - **Preview language:** Choose **English**, **中文**, or **English + 中文** (default) independently of the voice. This setting changes only the preview sample; narration follows the actual message text. Existing character voice assignments are preserved.
 - **Voice delivery instructions:** Optional natural-language directions, such as speaking gently or using a particular emotion. Leave blank to let the model interpret the text.
@@ -39,12 +41,31 @@ Railway serves the extension files. Speech requests travel from your browser dir
 
 MiniMax (Canary) is an alternative to SillyTavern's built-in MiniMax provider when you want the current models or streaming. The built-in provider sends each passage through the SillyTavern server and plays it only after generation finishes. The two do not share a key (see [Keys and privacy](#keys-and-privacy)).
 
+Settings are grouped into collapsible sections. **Connection** folds to a one-line summary (key status and region) once a key is saved; **Fine-tuning** starts folded.
+
+**Connection**
+
 - **Region:** **Global** (`api.minimax.io`, default) or **Mainland China** (`api.minimaxi.com`). Keys are issued per region and do not work across regions.
-- **Model:** `speech-2.8-hd` (default), `speech-2.8-turbo`, `speech-2.6-hd`, `speech-2.6-turbo`, `speech-02-hd` or `speech-02-turbo`. **Custom model ID** overrides the list, for a model released after this version of Canary.
-- **Emotion:** **Auto** (default) lets the model choose from the text. Happy, sad, angry, fearful, disgusted, surprised, calm, fluent or whisper applies to every voice. Per MiniMax, fluent and whisper need a `speech-2.6` model, and `speech-2.8` does not support whisper.
-- **Voices:** After you save a key, Canary loads your account's voices: cloned and designed voices first, then every system voice. Without a key, or if loading fails, a built-in list of English, Chinese, Cantonese and Japanese system voices is shown. Voices appear by voice ID. SillyTavern's **Reload** button reloads the list. Voices already assigned in the voice map stay selectable even if the list could not be loaded.
-- **Text:** Canary sends the original text with automatic language detection (`language_boost: auto`). `speech-2.8` models perform interjection tags written in the text, such as `(laughs)` or `(sighs)`, and MiniMax reads `<#0.5#>` as a half-second pause.
-- **Playback speed:** Sent to MiniMax as its speed parameter (0.5–2×), so speech changes pace without changing pitch.
+
+**Voice**
+
+- **Model:** `speech-2.8-hd` (default), `speech-2.8-turbo`, `speech-2.6-hd`, `speech-2.6-turbo`, `speech-02-hd` or `speech-02-turbo`. `speech-2.8` models perform interjection tags written in the text, such as `(laughs)` or `(sighs)`, and MiniMax reads `<#0.5#>` as a half-second pause.
+- **Emotion:** **Auto** (default) lets the model choose from the text. Happy, sad, angry, fearful, disgusted, surprised, calm, fluent or whisper applies to every voice. MiniMax lists fluent and whisper only for `speech-2.6` models; Canary shows a warning if you pick them with another listed model.
+- **Language:** **Auto-detect** (default) or one of the 40 languages MiniMax supports (`language_boost`). Set one if auto-detection misreads short or mixed lines, for example Cantonese read as Mandarin. Applies to every voice.
+- **Playback speed:** Uses SillyTavern's **Audio Playback Speed** slider, sent to MiniMax as its speed parameter (0.5–2×), so speech changes pace without changing pitch.
+
+**Fine-tuning**
+
+- **Volume:** 0.1–10 (default 1). **Pitch:** −12 to +12 semitones (default 0).
+- **Read numbers and dates naturally:** MiniMax text normalization for Chinese and English, at a slightly slower start. Off by default.
+- **Custom model ID:** overrides **Model**, for a model released after this version of Canary.
+- **Streaming buffer**, and **Reset fine-tuning** to restore all of the above to defaults.
+
+Only changed values are sent; defaults leave MiniMax's own behavior untouched.
+
+**Preview and voices**
+
+After you save a key, Canary loads your account's voices: cloned and designed voices under **Your voices**, then system voices grouped by language. Without a key, or if loading fails, a built-in list of English, Chinese, Cantonese and Japanese system voices is shown. Long lists get a search box that matches every word you type, such as `calm japanese`. Voices appear by voice ID. SillyTavern's **Reload** button reloads the list. Voices already assigned in the voice map stay selectable even if the list could not be loaded. The voice map's own dropdowns belong to SillyTavern and stay a plain list.
 
 Long passages are split at a client policy of 3,000 Unicode code points per request (MiniMax accepts under 10,000).
 
@@ -110,7 +131,7 @@ Before running browser tests, record existing browser/Node PIDs. Afterward verif
 
 Verified in the development harness (MiMo): first playback before stream completion, PCM continuity, native Stop, cancellation before first audio, chat/provider changes, completed previews, programmatic narration replacement, key storage/removal, restoring the selected provider, and narrow viewport layout. Unit tests exercise fragmented SSE/UTF-8, odd PCM bytes, malformed/truncated streams, HTTP errors, text splitting, and key isolation.
 
-MiniMax unit tests cover the request format, hex PCM streaming, skipping the aggregated final chunk, errors reported inside HTTP 200 responses, voice listing, region hosts and separate key storage. The browser harness adds MiniMax scenarios for account voices in the voice map, streaming before completion, native Stop, emotion/custom model/native speed, region switching, redacted errors, and switching between Canary providers.
+MiniMax unit tests cover the request format (including language, volume, pitch and normalization), voice grouping, hex PCM streaming, skipping the aggregated final chunk, errors reported inside HTTP 200 responses, voice listing, region hosts and separate key storage. The browser harness adds MiniMax scenarios for collapsible sections and the connection summary, grouped voices and voice search, the emotion warning, fine-tuning and its reset, account voices in the voice map, streaming before completion, native Stop, emotion/custom model/native speed, region switching, redacted errors, and switching between Canary providers.
 
 **Not yet verified:** live authenticated MiMo or MiniMax synthesis, real-world time to first audio, your deployed Railway instance, and physical iPhone/PWA playback. Mocked audio tests verify integration and scheduling, not MiMo voice quality or account access.
 

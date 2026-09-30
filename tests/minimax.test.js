@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILT_IN_VOICES, buildRequest, fetchVoices, streamSpeech } from '../lib/minimax-api.js';
+import { BUILT_IN_VOICES, buildRequest, emotionWarning, fetchVoices, groupVoices, streamSpeech } from '../lib/minimax-api.js';
 import { KeyStore } from '../lib/key-store.js';
 import { MinimaxProvider } from '../providers/minimax.js';
 
@@ -136,4 +136,47 @@ test('MiniMax provider keeps mapped voices, passes speed natively and uses the c
     assert.equal(request.url, 'https://api.minimaxi.com/v1/t2a_v2');
     assert.equal(request.body.model, 'speech-3-hd');
     assert.deepEqual(request.body.voice_setting, { voice_id: 'my-clone', speed: 1.5, emotion: 'calm' });
+});
+
+test('MiniMax language, volume, pitch and normalization are sent only when changed', () => {
+    const base = { text: 'Hi', voice: 'v', model: 'speech-2.8-hd' };
+    assert.deepEqual(buildRequest(base).voice_setting, { voice_id: 'v', speed: 1 });
+    const req = buildRequest({ ...base, language: 'Chinese,Yue', volume: 2.54, pitch: -3.6, normalize: true });
+    assert.equal(req.language_boost, 'Chinese,Yue');
+    assert.deepEqual(req.voice_setting, { voice_id: 'v', speed: 1, vol: 2.5, pitch: -4, text_normalization: true });
+    assert.deepEqual(buildRequest({ ...base, volume: 50, pitch: 40 }).voice_setting, { voice_id: 'v', speed: 1, vol: 10, pitch: 12 });
+    assert.throws(() => buildRequest({ ...base, language: 'Klingon' }), /language/);
+});
+
+test('MiniMax voices are grouped: your voices first, then languages, unknown last', async () => {
+    const voices = await fetchVoices({ key: 'k', region: 'global', fetchImpl: async () => json({
+        system_voice: ['Mystery_Voice', 'czech_calm_woman', 'Arrogant_Miss', 'Japanese_KindLady', 'English_CalmWoman'].map(voice_id => ({ voice_id })),
+        voice_generation: [{ voice_id: 'designed-1' }],
+        voice_cloning: [{ voice_id: 'clone-1' }],
+        base_resp: ok,
+    }) });
+    assert.deepEqual(groupVoices(voices).map(group => [group.label, group.voices.map(voice => voice.voice_id)]), [
+        ['Your voices', ['clone-1', 'designed-1']],
+        ['English', ['English_CalmWoman']],
+        ['Chinese (Mandarin)', ['Arrogant_Miss']],
+        ['Japanese', ['Japanese_KindLady']],
+        ['Czech', ['czech_calm_woman']],
+        ['Other voices', ['Mystery_Voice']],
+    ]);
+});
+
+test('emotion warning follows MiniMax model support and ignores unknown custom models', () => {
+    assert.match(emotionWarning('whisper', 'speech-2.8-hd'), /speech-2\.6/);
+    assert.match(emotionWarning('fluent', 'speech-02-turbo'), /Fluent/);
+    assert.equal(emotionWarning('whisper', 'speech-2.6-turbo'), '');
+    assert.equal(emotionWarning('calm', 'speech-2.8-hd'), '');
+    assert.equal(emotionWarning('whisper', 'speech-9-future'), '');
+});
+
+test('MiniMax provider settings clamp fine-tuning and reject unknown languages', () => {
+    const provider = new MinimaxProvider({ keys: { value: '' } });
+    const parsed = provider.parseSettings({ volume: '99', pitch: -20.4, normalize: 'yes', language: 'Klingon' });
+    assert.deepEqual([parsed.volume, parsed.pitch, parsed.normalize, parsed.language], [10, -12, false, 'auto']);
+    assert.deepEqual(provider.parseSettings({ volume: '', pitch: null }).volume, 1);
+    assert.equal(provider.summaryParts()[0], 'Global');
 });

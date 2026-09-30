@@ -48,11 +48,13 @@ const html = `<!doctype html><html><meta charset="utf-8"><meta name="viewport" c
 <link rel="stylesheet" href="/canary/style.css"><style>
 body{background:#222;color:#eee;font:16px system-ui;margin:16px;max-width:720px}button,select,input,textarea{font:inherit;box-sizing:border-box}
 .text_pole{width:100%;padding:8px;background:#333;color:#eee;border:1px solid #777;border-radius:5px}.menu_button{padding:7px;cursor:pointer}
-.inline-drawer-content{display:block}.tts_voicemap_block_char{display:flex;justify-content:space-between;gap:8px;margin:8px 0}
+.inline-drawer-content{display:none}#tts_settings>.inline-drawer>.inline-drawer-content{display:block}.inline-drawer-header{display:flex;justify-content:space-between;align-items:center;padding:5px 0;cursor:pointer}.tts_voicemap_block_char{display:flex;justify-content:space-between;gap:8px;margin:8px 0}
 .tts_voicemap_block_char select{max-width:55%}#tts_media_control{display:inline-block;padding:10px;border:1px solid #888;cursor:pointer}#tts_media_control:after{content:'Native play / stop'}
 </style><h1>Canary integration QA</h1><div id="tts_container"></div><div id="tts_wand_container"></div>
 <div class="mes" mesid="0"><button class="mes_narrate">Read Alice</button></div>
 <script src="/jquery.js"></script><script>
+// Mirrors SillyTavern's global inline-drawer toggle (script.js), without the slide animation.
+$(document).on('click','.inline-drawer-toggle',function(e){if($(e.target).hasClass('text_pole'))return;const d=$(this).closest('.inline-drawer');d.find('>.inline-drawer-header .inline-drawer-icon').toggleClass('down up').toggleClass('fa-circle-chevron-down fa-circle-chevron-up');d.find('>.inline-drawer-content').toggle();});
 window.errors=[];window.notices=[];window.toastr={error:m=>window.errors.push(String(m)),success:m=>window.notices.push(String(m)),info:()=>{}};
 window.events=new Proxy({},{get:(_,p)=>p});
 window.bus={handlers:{},ready:false,on(e,fn){(this.handlers[e]??=[]).push(fn);if(e==='APP_READY'&&this.ready)void fn()},makeLast(e,fn){this.on(e,fn)},removeListener(e,fn){this.handlers[e]=(this.handlers[e]||[]).filter(f=>f!==fn)},async emit(e,...args){if(e==='APP_READY')this.ready=true;for(const fn of [...(this.handlers[e]||[])])await fn(...args)}};
@@ -171,6 +173,13 @@ async function waitUntil(check, ms = 5000) {
         await new Promise(resolve => setTimeout(resolve, 25));
     }
 }
+
+const sectionContent = key => page.locator(`.canary-section[data-section="${key}"] > .inline-drawer-content`);
+async function openSection(key) {
+    if (!(await sectionContent(key).isVisible())) await page.click(`.canary-section[data-section="${key}"] > .inline-drawer-header`);
+    await sectionContent(key).waitFor({ state: 'visible' });
+}
+const optgroups = () => page.locator('#canary-preview-voice optgroup').evaluateAll(groups => groups.map(group => group.label));
 
 let browser;
 let context;
@@ -326,8 +335,12 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.uncheck('#tts_narrate_by_paragraphs');
         console.log('PASS disabling TTS cancels active and queued narration');
 
+        assert.equal(await sectionContent('connection').isVisible(), false, 'Connection folds once a key is saved');
+        assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · this session');
+        await openSection('connection');
         await page.check('#canary-remember');
         await page.click('#canary-save-key');
+        assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · remembered');
         assert.equal(await page.evaluate(() => window.settings.canary.mimoKey), 'qa-key-never-real');
         assert.equal(await page.evaluate(() => window.notices.at(-1)), 'Key saved to this SillyTavern account.');
         assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings.tts))).includes('qa-key-never-real'));
@@ -345,6 +358,7 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(requests.at(-1).closed, true);
         await page.selectOption('#tts_provider', 'Xiaomi MiMo (Canary)');
         console.log('PASS provider change during native narration');
+        await openSection('connection');
         await page.click('#canary-forget-key');
         assert.equal(await page.evaluate(() => window.notices.at(-1)), 'Key removed.');
         assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('qa-server-settings')).canary.mimoKey), undefined);
@@ -362,11 +376,25 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.inputValue('#canary-model'), 'speech-2.8-hd');
         assert.equal(await page.inputValue('#canary-emotion'), '');
         assert.ok(await page.locator('#canary-preview-voice option').count() >= 100, 'Built-in voices are listed without a key');
+        assert.equal(await sectionContent('connection').isVisible(), true, 'Connection is open without a key');
+        assert.equal(await sectionContent('tuning').isVisible(), false, 'Fine-tuning starts folded');
+        assert.equal(await page.textContent('#canary-connection-summary'), 'No key saved · Global');
+        assert.deepEqual((await optgroups()).slice(0, 4), ['English', 'Chinese (Mandarin)', 'Cantonese', 'Japanese']);
+        await page.locator('#canary-voice-search').fill('calm japanese');
+        assert.deepEqual(await page.locator('#canary-preview-voice option').evaluateAll(o => o.map(x => x.value)), ['Japanese_CalmLady']);
+        await page.locator('#canary-voice-search').fill('no such voice');
+        assert.equal(await page.inputValue('#canary-preview-voice'), '');
+        await page.locator('#canary-voice-search').fill('');
+        assert.equal(await page.inputValue('#canary-preview-voice'), 'English_expressive_narrator', 'Clearing the search restores the chosen voice');
+        console.log('PASS MiniMax sections, connection summary, grouped built-in voices and voice search');
         await page.locator('#canary-key').fill('qa-minimax-key');
         await page.check('#canary-remember');
         await page.click('#canary-save-key');
         await page.waitForFunction(() => document.querySelector('#canary-preview-voice option')?.value === 'qa-clone');
         assert.equal(await page.inputValue('#canary-preview-voice'), 'English_expressive_narrator');
+        assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · remembered · Global');
+        assert.deepEqual(await optgroups(), ['Your voices', 'English']);
+        assert.equal(await page.locator('#canary-voice-search-row').isVisible(), false, 'Short lists need no search box');
         const voiceRequest = minimaxRequests.at(-1);
         assert.deepEqual([voiceRequest.endpoint, voiceRequest.region, voiceRequest.auth], ['get_voice', 'global', 'Bearer qa-minimax-key']);
         assert.equal(await page.evaluate(() => window.settings.canary.minimaxKey), 'qa-minimax-key');
@@ -394,7 +422,15 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         console.log('PASS MiniMax narration streams before completion and native Stop closes the stream');
 
         await page.evaluate(() => { window.mockMode = 'short'; window.settings.tts.playback_rate = 1.5; });
+        await page.selectOption('#canary-emotion', 'whisper');
+        assert.match(await page.textContent('#canary-emotion-warning'), /speech-2\.6/);
+        assert.equal(await page.locator('#canary-emotion-warning').isVisible(), true);
+        await page.selectOption('#canary-model', 'speech-2.6-hd');
+        assert.equal(await page.locator('#canary-emotion-warning').isVisible(), false);
+        await page.selectOption('#canary-model', 'speech-2.8-hd');
         await page.selectOption('#canary-emotion', 'calm');
+        assert.equal(await page.locator('#canary-emotion-warning').isVisible(), false);
+        await openSection('tuning');
         await page.locator('#canary-custom-model').fill('speech-9-qa');
         const startsBefore = await page.evaluate(() => window.audioStarts.length);
         await page.click('#canary-preview');
@@ -407,6 +443,28 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.deepEqual(preview.voice_setting, { voice_id: 'English_expressive_narrator', speed: 1.5, emotion: 'calm' });
         await page.evaluate(() => { window.settings.tts.playback_rate = 1; });
         console.log('PASS MiniMax emotion, custom model and native speed; final aggregated audio is not replayed');
+
+        await page.locator('#canary-volume').fill('2.5');
+        await page.locator('#canary-pitch').fill('-3');
+        await page.check('#canary-normalize');
+        await page.selectOption('#canary-language', 'Japanese');
+        assert.equal(await page.textContent('#canary-volume-value'), '2.5');
+        assert.equal(await page.textContent('#canary-pitch-value'), '-3');
+        await page.click('#canary-preview');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        const tuned = minimaxRequests.at(-1).body;
+        assert.equal(tuned.language_boost, 'Japanese');
+        assert.deepEqual(tuned.voice_setting, { voice_id: 'English_expressive_narrator', speed: 1, emotion: 'calm', vol: 2.5, pitch: -3, text_normalization: true });
+        await page.click('#canary-reset-tuning');
+        assert.equal(await page.inputValue('#canary-custom-model'), '');
+        assert.equal(await page.isChecked('#canary-normalize'), false);
+        await page.click('#canary-preview');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        const reset = minimaxRequests.at(-1).body;
+        assert.equal(reset.model, 'speech-2.8-hd');
+        assert.deepEqual(reset.voice_setting, { voice_id: 'English_expressive_narrator', speed: 1, emotion: 'calm' });
+        assert.equal(reset.language_boost, 'Japanese', 'Language is a voice setting, not fine-tuning');
+        console.log('PASS MiniMax language, volume, pitch and text normalization; Reset fine-tuning restores defaults');
 
         await page.selectOption('#canary-region', 'mainland');
         await waitUntil(() => minimaxRequests.at(-1).endpoint === 'get_voice' && minimaxRequests.at(-1).region === 'mainland');
@@ -425,6 +483,13 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         assert.equal(await page.inputValue('#canary-key'), 'qa-minimax-key');
         assert.equal(await page.inputValue('#canary-region'), 'mainland');
         assert.equal(await page.inputValue('#canary-emotion'), 'calm');
+        assert.equal(await page.inputValue('#canary-language'), 'Japanese');
+        assert.equal(await sectionContent('connection').isVisible(), false);
+        assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · remembered · Mainland China');
+        await page.setViewportSize({ width: 390, height: 844 });
+        await openSection('tuning');
+        assert.equal(await page.locator('.canary-settings').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
+        await page.locator('.canary-settings').screenshot({ path: path.join(root, '.qa', 'minimax-mobile.png') });
         assert.deepEqual(pageErrors, []);
         console.log('PASS switching between Canary providers keeps keys and settings separate');
     } finally {
