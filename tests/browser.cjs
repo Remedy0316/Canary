@@ -64,8 +64,9 @@ window.SillyTavern={getContext:()=>ctx};
 const nativeFetch=window.fetch;window.mockMode='normal';
 window.fetch=(url,opts)=>{
  if(typeof url==='string'&&url==='https://api.xiaomimimo.com/v1/chat/completions')url='/mock/mimo?mode='+window.mockMode;
- const minimax=typeof url==='string'&&url.match(/^https:\/\/api\.(minimax\.io|minimaxi\.com)\/v1\/(t2a_v2|get_voice)$/);
- if(minimax)url='/mock/minimax/'+(minimax[1]==='minimax.io'?'global':'mainland')+'/'+minimax[2]+'?mode='+window.mockMode;
+ // Plain string checks: this template literal would strip regex backslashes.
+ const region=typeof url!=='string'?null:url.startsWith('https://api.minimax.io/v1/')?'global':url.startsWith('https://api.minimaxi.com/v1/')?'mainland':null;
+ if(region)url='/mock/minimax/'+region+'/'+url.split('/').pop()+'?mode='+window.mockMode;
  return nativeFetch(url,opts);
 };
 window.audioStarts=[];window.audioStops=0;

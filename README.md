@@ -102,6 +102,8 @@ node tests/prepare-upstream.cjs
 npm run test:browser
 ```
 
+If Playwright is already installed globally (`npm install -g playwright`), skip the first two commands and point Node at it instead: `NODE_PATH="$(npm root -g)" node tests/browser.cjs`.
+
 The preparation script downloads official SillyTavern 1.19.0 TTS source, its settings template, and jQuery into the ignored `.qa/upstream` directory. The browser harness runs that native TTS implementation with mocked surrounding application services and local streaming MiMo and MiniMax endpoints. No live API key is used. Each browser test has finite timeouts and closes pages, context, browser, streams, and its local server in `finally`.
 
 Before running browser tests, record existing browser/Node PIDs. Afterward verify every test-owned process has exited, leaving pre-existing processes untouched. On Windows, `Get-CimInstance Win32_Process` provides PID and parent PID information; if unavailable, use an authorized process inspector before launching the test.
