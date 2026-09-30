@@ -23,3 +23,5 @@ body.canary-own-speed #playback_rate_block { display: none !important; }
 .canary-settings .canary-voice-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .canary-settings .canary-voice-list li span { min-width: 0; overflow-wrap: anywhere; }
 .canary-settings .canary-voice-list .menu_button { margin: 0; width: auto; flex: none; }
+/* Searchable (select2) dropdowns line up with SillyTavern's .text_pole selects. */
+.canary-settings .select2-container { margin: 5px 0; }

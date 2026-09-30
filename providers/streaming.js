@@ -44,15 +44,14 @@ export function bufferFieldHtml() {
 }
 
 export function previewFieldsHtml(voiceHelp) {
-    return `<div class="canary-row">
-                <div><label for="canary-preview-voice">Preview voice</label><select id="canary-preview-voice" class="text_pole"></select></div>
-                <div><label for="canary-preview-language">Sample language / 试听语言</label>
-                    <select id="canary-preview-language" class="text_pole">
-                        <option value="bilingual">English + 中文</option>
-                        <option value="en">English</option>
-                        <option value="zh">中文</option>
-                    </select></div>
-            </div>
+    // One field per line: voice names carry their IDs and need the full width.
+    return `<div><label for="canary-preview-voice">Preview voice</label><select id="canary-preview-voice" class="text_pole"></select></div>
+            <div><label for="canary-preview-language">Sample language / 试听语言</label>
+                <select id="canary-preview-language" class="text_pole">
+                    <option value="bilingual">English + 中文</option>
+                    <option value="en">English</option>
+                    <option value="zh">中文</option>
+                </select></div>
             <p class="canary-help">${voiceHelp}</p>
             <div class="canary-actions">
                 <button id="canary-preview" class="menu_button" type="button">Preview</button>
