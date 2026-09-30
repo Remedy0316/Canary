@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readSse } from '../lib/sse.js';
+import { prefetch, readSse } from '../lib/sse.js';
 import { buildRequest, streamSpeech } from '../lib/mimo-api.js';
 import { splitText } from '../lib/text.js';
 import { PcmDecoder, PcmPlayer } from '../lib/pcm-player.js';
@@ -26,6 +26,26 @@ test('SSE cancels a stalled reader on abort', { timeout: 1000 }, async () => {
     controller.abort();
     await assert.rejects(task, { name: 'AbortError' });
     assert.equal(cancelled, true);
+});
+
+test('SSE reports a dropped connection clearly instead of a bare TypeError', async () => {
+    const stream = new ReadableStream({ pull() { throw new TypeError('network error'); } });
+    await assert.rejects(collect(readSse(stream, undefined, 'MiniMax')), /connection to MiniMax dropped/);
+});
+
+test('prefetch keeps reading while the consumer is slow, then yields buffered items before a failure', async () => {
+    let read = 0;
+    async function* source() {
+        for (let i = 0; i < 5; i++) { read++; yield i; }
+        throw new Error('dropped');
+    }
+    const iterator = prefetch(source());
+    assert.equal((await iterator.next()).value, 0);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(read, 5);
+    const rest = [];
+    await assert.rejects((async () => { for await (const item of iterator) rest.push(item); })(), /dropped/);
+    assert.deepEqual(rest, [1, 2, 3, 4]);
 });
 
 test('MiMo request uses assistant text, separate instructions and PCM streaming', () => {

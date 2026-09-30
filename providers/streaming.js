@@ -1,4 +1,5 @@
 import { PcmPlayer } from '../lib/pcm-player.js';
+import { prefetch } from '../lib/sse.js';
 import { refreshSearchable } from '../lib/searchable.js';
 
 const PREVIEW_TEXT = Object.freeze({
@@ -309,7 +310,7 @@ export class StreamingProvider {
             this.status(`Waiting for ${this.service}’s first audio…`, 'waiting');
             for (const part of this.split(text)) {
                 heartbeat();
-                for await (const bytes of this.stream({ text: part, voice, signal, speed })) {
+                for await (const bytes of prefetch(this.stream({ text: part, voice, signal, speed }))) {
                     heartbeat();
                     await run.player.push(bytes, signal);
                 }
@@ -331,6 +332,8 @@ export class StreamingProvider {
             clearTimeout(totalTimer);
             signal.removeEventListener('abort', stopPlayer);
             run.player?.stop();
+            // End any download prefetch() is still running after a failure.
+            if (!signal.aborted) run.controller.abort();
             if (this.run === run) this.run = null;
         }
     }
