@@ -70,6 +70,7 @@ window.fetch=(url,opts)=>{
  // Plain string checks: this template literal would strip regex backslashes.
  const region=typeof url!=='string'?null:url.startsWith('https://api.minimax.io/v1/')?'global':url.startsWith('https://api.minimaxi.com/v1/')?'mainland':null;
  if(region)url='/mock/minimax/'+region+'/'+url.split('/').pop()+'?mode='+window.mockMode;
+ if(typeof url==='string'&&url.startsWith('https://api.elevenlabs.io/'))url='/mock/elevenlabs/'+url.slice('https://api.elevenlabs.io/'.length)+(url.includes('?')?'&':'?')+'mode='+window.mockMode;
  return nativeFetch(url,opts);
 };
 window.audioStarts=[];window.audioStops=0;
@@ -81,6 +82,7 @@ try {const canary=await import('/canary/index.js');await canary.initialize();con
 
 const requests = [];
 const minimaxRequests = [];
+const elevenlabsRequests = [];
 const mockTimers = new Set();
 const tone = () => {
     const pcm = Buffer.alloc(8640);
@@ -120,6 +122,35 @@ const server = http.createServer((req, res) => {
                     // The final event repeats every chunk as one aggregated clip.
                     res.end('data: ' + JSON.stringify({ data: { audio: Buffer.concat(sent).toString('hex'), status: 2 }, extra_info: { audio_length: 1 }, base_resp: ok }) + '\n\n');
                 }
+            }, 180);
+            mockTimers.add(timer);
+            res.on('close', () => { record.closed = true; clearInterval(timer); mockTimers.delete(timer); });
+        });
+        return;
+    }
+    if (url.pathname.startsWith('/mock/elevenlabs/')) {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            const record = { path: url.pathname.slice('/mock/elevenlabs'.length), format: url.searchParams.get('output_format'), key: req.headers['xi-api-key'], body: body ? JSON.parse(body) : null, completed: false, closed: false, mode: url.searchParams.get('mode') };
+            elevenlabsRequests.push(record);
+            if (record.mode === 'unauthorized') {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ detail: { status: 'invalid_api_key', message: 'private text must never reach UI' } }));
+                return;
+            }
+            if (record.path === '/v2/voices') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ voices: [{ voice_id: 'qa-el-premade', name: 'Rachel', category: 'premade' }, { voice_id: 'qa-el-clone', name: 'My Clone', category: 'cloned' }], has_more: false }));
+                return;
+            }
+            // Raw 24 kHz PCM, written as it is generated.
+            res.writeHead(200, { 'Content-Type': 'audio/pcm' });
+            res.flushHeaders();
+            let sent = 0;
+            const timer = setInterval(() => {
+                res.write(tone());
+                if (++sent >= (record.mode === 'short' ? 1 : 18)) { record.completed = true; res.end(); }
             }, 180);
             mockTimers.add(timer);
             res.on('close', () => { record.closed = true; clearInterval(timer); mockTimers.delete(timer); });
@@ -588,6 +619,66 @@ process.once('SIGINT', () => { void cleanup().then(() => process.exit(130)); });
         await page.locator('.canary-settings').screenshot({ path: path.join(root, '.qa', 'minimax-mobile.png') });
         assert.deepEqual(pageErrors, []);
         console.log('PASS switching between Canary providers keeps keys and settings separate');
+
+        await page.setViewportSize({ width: 1100, height: 1000 });
+        await page.evaluate(() => { window.mockMode = 'normal'; });
+        await page.selectOption('#tts_provider', 'ElevenLabs (Canary)');
+        assert.equal(await page.inputValue('#canary-key'), '', 'ElevenLabs has its own key field');
+        assert.equal(await page.locator('#canary-preview-voice option').count(), 0, 'Account voices need a key');
+        assert.equal(await page.locator('#playback_rate_block').isVisible(), true, 'ElevenLabs follows SillyTavern’s speed slider');
+        assert.equal(await page.inputValue('#canary-model'), 'eleven_v4');
+        assert.equal(await page.inputValue('#canary-stability'), '0.5');
+        assert.equal(await page.textContent('#canary-connection-summary'), 'No key saved');
+        await page.locator('#canary-key').fill('qa-elevenlabs-key');
+        await page.check('#canary-remember');
+        await page.click('#canary-save-key');
+        await page.waitForFunction(() => document.querySelector('#canary-preview-voice option')?.value === 'qa-el-clone');
+        assert.deepEqual(await optgroups(), ['Your voices', 'Default voices']);
+        assert.deepEqual([elevenlabsRequests.at(-1).path, elevenlabsRequests.at(-1).key], ['/v2/voices', 'qa-elevenlabs-key']);
+        assert.equal(await page.evaluate(() => window.settings.canary.elevenlabsKey), 'qa-elevenlabs-key');
+        assert.equal(await page.evaluate(() => window.settings.canary.minimaxKey), 'qa-minimax-key', 'Saving an ElevenLabs key leaves MiniMax alone');
+        assert.ok(!(await page.evaluate(() => JSON.stringify(window.settings.tts))).includes('qa-elevenlabs-key'));
+        await page.waitForFunction(() => [...document.querySelectorAll('#tts_voicemap_char_Alice_voice option')].some(o => o.value === 'My Clone · qa-el-clone'));
+        await choose('tts_voicemap_char_Alice_voice', 'my clone');
+        console.log('PASS ElevenLabs key is separate and account voices reach a searchable voice map');
+
+        await page.click('.mes_narrate');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.dataset.state === 'playing');
+        const elevenNarration = elevenlabsRequests.at(-1);
+        assert.equal(elevenNarration.path, '/v1/text-to-speech/qa-el-clone/stream');
+        assert.equal(elevenNarration.format, 'pcm_24000');
+        assert.equal(elevenNarration.completed, false, 'ElevenLabs audio must start before the HTTP stream completes');
+        assert.deepEqual(elevenNarration.body, { model_id: 'eleven_v4', text: 'Hello from Alice.', voice_settings: { stability: 0.5 } });
+        await page.click('#tts_media_control');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Stopped.');
+        await page.waitForTimeout(300);
+        assert.equal(elevenNarration.closed, true);
+        console.log('PASS ElevenLabs v4 narration streams before completion and native Stop closes the stream');
+
+        await page.evaluate(() => { window.mockMode = 'short'; });
+        await page.selectOption('#canary-model', 'eleven_v3');
+        await page.selectOption('#canary-stability', '0');
+        await page.click('#canary-preview');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.textContent === 'Finished. Ready to stream.');
+        assert.deepEqual([elevenlabsRequests.at(-1).body.model_id, elevenlabsRequests.at(-1).body.voice_settings.stability], ['eleven_v3', 0]);
+        await page.evaluate(() => { window.mockMode = 'unauthorized'; });
+        await page.click('#canary-preview');
+        await page.waitForFunction(() => document.querySelector('#canary-status')?.dataset.state === 'error');
+        assert.ok((await page.textContent('#canary-status')).includes('API key'));
+        assert.ok(!(await page.textContent('body')).includes('private text'));
+        await page.evaluate(() => { window.mockMode = 'normal'; });
+        await page.selectOption('#tts_provider', 'MiniMax (Canary)');
+        await page.selectOption('#tts_provider', 'ElevenLabs (Canary)');
+        assert.equal(await page.inputValue('#canary-key'), 'qa-elevenlabs-key');
+        assert.equal(await page.inputValue('#canary-model'), 'eleven_v3');
+        assert.equal(await page.inputValue('#canary-stability'), '0');
+        assert.equal(await page.textContent('#canary-connection-summary'), '✓ Key saved · remembered');
+        await page.setViewportSize({ width: 390, height: 844 });
+        await openSection('tuning');
+        assert.equal(await page.locator('.canary-settings').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
+        await page.locator('.canary-settings').screenshot({ path: path.join(root, '.qa', 'elevenlabs-mobile.png') });
+        assert.deepEqual(pageErrors, []);
+        console.log('PASS ElevenLabs model and stability, redacted key error, settings kept across provider switches');
     } finally {
         await cleanup();
         console.log('CLEANUP browser, context, pages, mock streams and server closed');

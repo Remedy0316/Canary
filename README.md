@@ -4,17 +4,18 @@ Streaming TTS providers for [SillyTavern](https://github.com/SillyTavern/SillyTa
 
 - **Xiaomi MiMo** (`mimo-v2.5-tts`), with eight preset voices and optional voice delivery instructions.
 - **MiniMax** (`speech-2.8`, `speech-2.6` and `speech-02` models), with your account's system and cloned voices, a global emotion setting, and a region selector.
+- **ElevenLabs** (Eleven v4, v3, Multilingual v2 and Flash v2.5), with the voices in your account's My Voices.
 
 Canary starts playing incoming audio while the provider is still generating speech. PCM chunks are scheduled on a continuous Web Audio clock, with a small configurable buffer. SillyTavern continues to manage character voice assignments, text processing, narration jobs, and automatic reading.
 
 ## Install
 
-Requires **SillyTavern 1.19.0 or newer**, its built-in **TTS** extension enabled, a browser with Web Audio support, and your own API key: a MiMo key with access to `mimo-v2.5-tts`, or a MiniMax key.
+Requires **SillyTavern 1.19.0 or newer**, its built-in **TTS** extension enabled, a browser with Web Audio support, and your own API key: a MiMo key with access to `mimo-v2.5-tts`, a MiniMax key, or an ElevenLabs key.
 
 1. Open SillyTavern's **Extensions → Install extension**.
 2. Paste `https://github.com/Remedy0316/Canary`.
 3. Install and reload SillyTavern.
-4. Open **TTS**, enable it, and select **Xiaomi MiMo (Canary)** or **MiniMax (Canary)**.
+4. Open **TTS**, enable it, and select **Xiaomi MiMo (Canary)**, **MiniMax (Canary)** or **ElevenLabs (Canary)**.
 5. For MiniMax, first choose the **Region** where your key was issued. Enter your API key, tick **Remember for this SillyTavern account** if you want it kept across reloads and devices, and click **Save key**.
 6. Assign a voice to **[Default Voice]** and/or individual characters in the native voice map.
 7. Click **Preview** to check speech. Use SillyTavern's message narration or TTS playback controls to read a message.
@@ -25,7 +26,7 @@ There is no build step, companion server, server plugin, or extra Railway servic
 
 Choose **Install just for me** so Canary is installed under `data/<user-handle>/extensions`. Ensure your deployment's **data directory is on its persistent volume**. An extension installed into an ephemeral application directory can disappear on redeploy.
 
-Railway serves the extension files. Speech requests travel from your browser directly to `https://api.xiaomimimo.com`, `https://api.minimax.io` or `https://api.minimaxi.com`, so the browser needs network access to the endpoint you use. Canary does not route audio through Railway.
+Railway serves the extension files. Speech requests travel from your browser directly to `https://api.xiaomimimo.com`, `https://api.minimax.io`, `https://api.minimaxi.com` or `https://api.elevenlabs.io`, so the browser needs network access to the endpoint you use. Canary does not route audio through Railway.
 
 ## Using streaming
 
@@ -74,10 +75,24 @@ After you save a key, Canary loads your account's voices: cloned and designed vo
 
 Long passages are split at a client policy of 3,000 Unicode code points per request (MiniMax accepts under 10,000).
 
-### Both providers
+### ElevenLabs
+
+ElevenLabs (Canary) adds Eleven v4, which SillyTavern's built-in ElevenLabs provider does not list, and streams audio as it is generated. The built-in provider sends each passage through the SillyTavern server and plays it only after generation finishes. The two do not share a key (see [Keys and privacy](#keys-and-privacy)).
+
+Settings are grouped into Connection, Voice, Fine-tuning and Preview.
+
+- **Model:** **Eleven v4** (`eleven_v4`, default), **Eleven v3**, **Multilingual v2** or **Flash v2.5**. Eleven v4 and v3 perform audio tags written in the text, such as `[whispers]` or `[laughs]`. Eleven v4 Turbo is offered by ElevenLabs only over WebSocket and is not listed.
+- **Stability:** **Creative** (0), **Natural** (0.5, default) or **Robust** (1). Creative is the most expressive, Robust the most consistent. These are the three values Eleven v3 accepts; the other models accept them too.
+- **Custom model ID** (Fine-tuning): overrides **Model**, for a model released after this version of Canary.
+- **Voices:** After you save a key, Canary loads the voices in your account's **My Voices**: cloned, designed and library voices under **Your voices**, then ElevenLabs' **Default voices**. To use a voice from the ElevenLabs Voice Library, add it to My Voices on the ElevenLabs website, then click SillyTavern's **Reload**. Without a key the list is empty. Voices appear as a name plus the voice ID, and the Preview voice and voice map dropdowns are searchable, as for MiniMax. Voices already assigned in the voice map stay selectable even if the list could not be loaded.
+- **Speed:** follows SillyTavern's **Audio Playback Speed** slider, as for MiMo.
+
+Long passages are split at a client policy of 3,000 Unicode code points per request (Eleven v3 accepts up to 5,000). Each request also sends up to 300 characters of the neighbouring passages as context, so delivery flows across the split; ElevenLabs does not read that context aloud.
+
+### All providers
 
 - **Streaming buffer:** 80, 120 (default), or 250 ms. This is the local playback buffer, not a promise about the provider's server latency. A larger buffer can absorb small network delays.
-- **Playback speed (MiMo):** Uses SillyTavern's **Audio Playback Speed** slider when each speech job starts, clamped to 0.5–2×. MiMo audio is played faster or slower, which also shifts pitch. MiniMax uses its own **Speed** setting instead.
+- **Playback speed (MiMo and ElevenLabs):** Uses SillyTavern's **Audio Playback Speed** slider when each speech job starts, clamped to 0.5–2×. Audio is played faster or slower, which also shifts pitch. MiniMax uses its own **Speed** setting instead.
 - **Enable audio:** Click once if the browser blocks automatic audio. Preview and native narration clicks also attempt to enable it, and while automatic narration is on (or audio is playing), any tap or key press on the page does too.
 - **Stop:** Canary's Stop button and SillyTavern's native TTS Stop cancel both playback and the HTTP stream. Chat changes, swipes, provider changes, and disabling TTS also stop playback.
 - **Automatic narration:** Uses SillyTavern's existing settings. To start narrating paragraphs while a chat response is still being written, enable its **Auto Generation** and **Narrate by paragraphs (when streaming)** options. This is separate from streaming the audio of each passage.
@@ -88,7 +103,7 @@ Canary aborts after 45 seconds without new audio, or after ten minutes for a sin
 
 ## Keys and privacy
 
-Each provider has its own key field. SillyTavern keeps its built-in MiniMax key on the server and deliberately never sends it to the browser, while Canary calls the provider from the browser, so Canary needs its own copy of the key.
+Each provider has its own key field. SillyTavern keeps its built-in MiniMax and ElevenLabs keys on the server and deliberately never sends them to the browser, while Canary calls the provider from the browser, so Canary needs its own copy of the key.
 
 Keys are kept in memory for the current page session by default. Switching providers preserves the session key; reloading or closing the page clears it.
 
@@ -96,7 +111,7 @@ Keys are kept in memory for the current page session by default. Switching provi
 
 The saved key is protected only by SillyTavern's own access control: anyone who can sign in to that account (basic auth or user-account login) can retrieve it, and so can scripts and extensions running in SillyTavern. It is stored unencrypted, and also appears in SillyTavern's automatic settings backups (`data/<user-handle>/backups`) and in anything with access to your server's data volume.
 
-Keys are kept in a separate `canary` settings entry (`mimoKey`, `minimaxKey`), never in the TTS provider settings object, which SillyTavern logs to the browser console on save. Canary does not embed shared credentials, send your browser cookies to either provider, or save generated audio files. MiMo receives the text being narrated, the optional delivery instructions, and your API key. MiniMax receives the text being narrated, your voice, model and emotion choices, and your API key; Canary also asks it for your account's voice list when the provider loads, a key is saved, or the region changes. Each provider's service terms and usage limits apply.
+Keys are kept in a separate `canary` settings entry (`mimoKey`, `minimaxKey`, `elevenlabsKey`), never in the TTS provider settings object, which SillyTavern logs to the browser console on save. Canary does not embed shared credentials, send your browser cookies to any provider, or save generated audio files. MiMo receives the text being narrated, the optional delivery instructions, and your API key. MiniMax receives the text being narrated, your voice, model and emotion choices, and your API key; Canary also asks it for your account's voice list when the provider loads, a key is saved, or the region changes. ElevenLabs receives the text being narrated, up to 300 characters of the neighbouring passages, your voice, model and stability choices, and your API key; Canary also asks it for your account's voice list when the provider loads or a key is saved. A key restricted in the ElevenLabs dashboard needs the Text to Speech and Voices (read) permissions. Each provider's service terms and usage limits apply.
 
 ## Compatibility and limits
 
@@ -109,7 +124,8 @@ Keys are kept in a separate `canary` settings entry (`mimoKey`, `minimaxKey`), n
 - **iPhone and iPad:** Canary declares its audio as media playback (iOS 16.4+), so it plays with the silent switch on and pauses other apps' audio while it speaks, like a podcast. iOS pauses Web Audio when the screen locks or the app goes to the background; tap the page on return to resume. After 45 seconds paused, Canary stops that narration and reports the interruption.
 - This release supports preset-voice `mimo-v2.5-tts`. MiMo voice design and voice cloning are not included.
 - MiniMax cloned and designed voices can be used once created on the MiniMax platform; Canary does not create them. Pronunciation dictionaries, voice mixing and subtitles are not included.
-- If MiMo or MiniMax changes its browser CORS policy, direct requests may stop working. Canary reports connection failures rather than sending keys through a third-party proxy.
+- ElevenLabs voices can be used once they are in My Voices; Canary does not clone, design or add voices. Pronunciation dictionaries, timestamps and WebSocket models (Eleven v4 Turbo) are not included.
+- If MiMo, MiniMax or ElevenLabs changes its browser CORS policy, direct requests may stop working. Canary reports connection failures rather than sending keys through a third-party proxy.
 
 ## Development and verification
 
@@ -131,13 +147,15 @@ npm run test:browser
 
 If Playwright is already installed globally (`npm install -g playwright`), skip the first two commands and point Node at it instead: `NODE_PATH="$(npm root -g)" node tests/browser.cjs`.
 
-The preparation script downloads official SillyTavern 1.19.0 TTS source, its settings template, and jQuery into the ignored `.qa/upstream` directory. The browser harness runs that native TTS implementation with mocked surrounding application services and local streaming MiMo and MiniMax endpoints. No live API key is used. Each browser test has finite timeouts and closes pages, context, browser, streams, and its local server in `finally`.
+The preparation script downloads official SillyTavern 1.19.0 TTS source, its settings template, and jQuery into the ignored `.qa/upstream` directory. The browser harness runs that native TTS implementation with mocked surrounding application services and local streaming MiMo, MiniMax and ElevenLabs endpoints. No live API key is used. Each browser test has finite timeouts and closes pages, context, browser, streams, and its local server in `finally`.
 
 Before running browser tests, record existing browser/Node PIDs. Afterward verify every test-owned process has exited, leaving pre-existing processes untouched. On Windows, `Get-CimInstance Win32_Process` provides PID and parent PID information; if unavailable, use an authorized process inspector before launching the test.
 
 Verified in the development harness (MiMo): first playback before stream completion, PCM continuity, native Stop, cancellation before first audio, chat/provider changes, completed previews, programmatic narration replacement, key storage/removal, restoring the selected provider, and narrow viewport layout. Unit tests exercise fragmented SSE/UTF-8, odd PCM bytes, malformed/truncated streams, HTTP errors, text splitting, and key isolation.
 
 MiniMax unit tests cover the request format (including language, volume, pitch and normalization), voice grouping, hex PCM streaming, skipping the aggregated final chunk, errors reported inside HTTP 200 responses, voice listing, region hosts and separate key storage. The browser harness adds MiniMax scenarios for collapsible sections and the connection summary, grouped voices and searchable dropdowns (preview, language and voice map, including a voice map rebuild), the emotion warning, fine-tuning and its reset, account voices in the voice map, streaming before completion, native Stop, emotion/custom model/native speed, region switching, redacted errors, and switching between Canary providers.
+
+ElevenLabs unit tests cover the request format (stability, neighbouring-passage context, voice IDs in the URL), raw PCM streaming before completion, error mapping without echoing upstream text (including exhausted credits reported as HTTP 401), dropped and empty streams, and paginated voice listing. The browser harness adds ElevenLabs scenarios for separate key storage, grouped account voices in a searchable voice map, v4 narration streaming before completion, native Stop, model and stability changes, a redacted key error, and keeping settings across provider switches. ElevenLabs was also checked live with a credit-limited key: voice listing, and streamed synthesis with every listed model from Node and from a Chromium page.
 
 **Not yet verified:** live authenticated MiMo or MiniMax synthesis, real-world time to first audio, your deployed Railway instance, and physical iPhone/PWA playback. Mocked audio tests verify integration and scheduling, not MiMo voice quality or account access.
 
@@ -148,9 +166,13 @@ index.js                 Provider registration and SillyTavern integration
 providers/streaming.js   Shared settings markup, voice mapping contract, playback lifecycle
 providers/mimo.js        MiMo settings and request options
 providers/minimax.js     MiniMax settings, region, account voice loading
+providers/elevenlabs.js  ElevenLabs settings and account voice loading
 lib/mimo-api.js          MiMo request format and stream validation
 lib/minimax-api.js       MiniMax request format, stream validation, voice listing
 lib/minimax-voices.js    Built-in MiniMax voice IDs used without a key
+lib/elevenlabs-api.js    ElevenLabs request format, PCM streaming, voice listing
+lib/voice-names.js       Unique "name · ID" voice labels for the voice map
+lib/searchable.js        Searchable dropdowns, including the voice map
 lib/text.js              Text splitting near sentence boundaries
 lib/sse.js               Incremental server-sent event parser
 lib/pcm-player.js        PCM conversion and continuous Web Audio scheduling
@@ -163,5 +185,6 @@ New providers can extend `StreamingProvider` with their own settings and stream 
 
 - [MiMo speech synthesis documentation](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5)
 - [MiniMax text-to-speech HTTP API](https://platform.minimax.io/docs/api-reference/speech-t2a-http) and [Get Voice API](https://platform.minimax.io/docs/api-reference/voice-management-get)
+- [ElevenLabs Stream speech API](https://elevenlabs.io/docs/api-reference/text-to-speech/stream), [List voices API](https://elevenlabs.io/docs/api-reference/voices/search) and [models](https://elevenlabs.io/docs/overview/models)
 - [SillyTavern extension development](https://docs.sillytavern.app/for-contributors/writing-extensions/)
 - [SillyTavern TTS implementation](https://github.com/SillyTavern/SillyTavern/blob/1.19.0/public/scripts/extensions/tts/index.js)

@@ -1,5 +1,6 @@
 import { MimoProvider, PROVIDER_NAME as MIMO_NAME } from './providers/mimo.js';
 import { MinimaxProvider, PROVIDER_NAME as MINIMAX_NAME } from './providers/minimax.js';
+import { ElevenLabsProvider, PROVIDER_NAME as ELEVENLABS_NAME } from './providers/elevenlabs.js';
 import { KeyStore } from './lib/key-store.js';
 
 const context = SillyTavern.getContext();
@@ -17,6 +18,7 @@ export async function initialize() {
         const providers = [
             [MIMO_NAME, MimoProvider, keyStore({ field: 'mimoKey', legacyPrefix: 'canary:mimo:key:' })],
             [MINIMAX_NAME, MinimaxProvider, keyStore({ field: 'minimaxKey' })],
+            [ELEVENLABS_NAME, ElevenLabsProvider, keyStore({ field: 'elevenlabsKey' })],
         ];
         // At most one Canary provider owns the page's audio and listeners.
         let activeProvider;
@@ -49,7 +51,7 @@ export async function initialize() {
             try { tts.registerTtsProvider(name, Provider); }
             finally { if (deferUi && selected === name) settings.currentProvider = selected; }
         }
-        console.info('[Canary] MiMo and MiniMax streaming providers registered.');
+        console.info('[Canary] MiMo, MiniMax and ElevenLabs streaming providers registered.');
     } catch (error) {
         console.error('[Canary] Initialization failed:', error.message);
         toastr.error(error.message, 'Canary');

@@ -64,7 +64,8 @@ export function previewFieldsHtml(voiceHelp) {
 export const STATUS_HTML = '<p id="canary-status" class="canary-status" role="status" aria-live="polite"></p>';
 
 // Playback lifecycle shared by streaming providers. Subclasses supply settingsHtml,
-// split(text) and stream({ text, voice, signal, speed }) yielding 24 kHz PCM bytes,
+// split(text) and stream({ text, voice, signal, speed, previousText, nextText })
+// yielding 24 kHz PCM bytes (the neighbouring parts are optional context),
 // and may extend parseSettings, bindSettings, onKeyChanged, summaryParts and groupVoices.
 export class StreamingProvider {
     constructor(host, { service, voices, defaultPreviewVoice, nativeSpeed = false }) {
@@ -308,9 +309,11 @@ export class StreamingProvider {
                 onStart: () => this.status('Playing streamed audio…', 'playing'),
             });
             this.status(`Waiting for ${this.service}’s first audio…`, 'waiting');
-            for (const part of this.split(text)) {
+            const parts = this.split(text);
+            for (const [index, part] of parts.entries()) {
                 heartbeat();
-                for await (const bytes of prefetch(this.stream({ text: part, voice, signal, speed }))) {
+                const neighbours = { previousText: parts[index - 1] ?? '', nextText: parts[index + 1] ?? '' };
+                for await (const bytes of prefetch(this.stream({ text: part, voice, signal, speed, ...neighbours }))) {
                     heartbeat();
                     await run.player.push(bytes, signal);
                 }
